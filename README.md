@@ -1,4 +1,4 @@
-# The Biomimetic SNN Engine
+# AetherCortex
 An explicit, mathematically rigorous neurological simulation representing the human brain structure utilizing **Spiking Neural Networks (SNN)** and **Leaky Integrate-and-Fire (LIF)** logic. 
 
 Unlike traditional AIs (which rely on highly structured numerical convolutions and algorithmic Transformers), this model structurally replicates the physical wiring of biological cortices. It utilizes time sequences and membrane potentials to organically link abstract textual concepts directly to massive visual and spatial reconstructions.
