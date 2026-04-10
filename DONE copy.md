@@ -33,7 +33,3 @@
 14. **Motor Retinal Persistence**: Scaled generation latency buffers. Added native Phosphor Decay `cv2.addWeighted()` into the `MotorDecoder`. Prevented biological computational delays (which took 14 frames for the thought to reach the visual motor strip) from generating completely pitch black glitch videos by dynamically extending generation bounds to 75 Frames and bleeding light mathematically over time!
 
 15. **Maximum Exposure Flat Decoding**: Replaced standard averaging (`reduce_mean`) with `reduce_max` accumulation when translating temporal spikes down into a flat 2D `.png` image, completely eradicating pitch-black images caused mathematically by temporal sparsity dilution.
-
-### Architecture V0.0.4 -> V0.0.5
-
-16. **Asynchronous Hebbian Trace Decoupling**: Solved a major SNN bottleneck by extracting massive `hebbian_trace.assign_add()` memory-write operations entirely from the active temporal inference loop. The core LIF engine now securely caches simple pulse rates mathematically during the `tf.function` forward pass, cleanly deferring the costly "cells that fire together, wire together" matrix outer-products to an isolated `self.brain.update_hebbian_traces()` routine triggered exactly once at the end of the batch, completely unblocking the GPU graph tracing mechanisms.

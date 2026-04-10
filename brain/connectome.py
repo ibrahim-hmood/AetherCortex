@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import os
 from cortices.visual_cortex import VisualCortex
+from cortices.motor_cortex import VisualMotorCortex
 from cortices.auditory_language import AuditoryLanguageCortex
 from cortices.executive import ExecutiveFrontalCortex
 from core.neuron import LIFCortexLayer, RecurrentLIFCortexLayer
@@ -11,17 +12,17 @@ class BrainConnectome:
     Connects the individual SNNs into a complete biological system.
     Signals flow as spike trains [batch, time_steps, features].
     """
-    def __init__(self, visual_input_dim=3072, auditory_input_dim=256):
-        # We assume 32x32x3 spatial geometry for visual inputs natively bridging the thalamus
-        self.visual_cortex = VisualCortex(input_shape=(32, 32, 3), v3_dim=128)
+    def __init__(self, visual_input_dim=12288, auditory_input_dim=256):
+        # We assume 64x64x3 spatial geometry for visual inputs natively bridging the thalamus
+        self.visual_cortex = VisualCortex(input_shape=(64, 64, 3), v3_dim=128)
         self.auditory_cortex = AuditoryLanguageCortex(auditory_dim=auditory_input_dim, internal_dim=128, executive_dim=256)
         
         # Integration point (Parietal Hub) - Uses Recurrent Attention to bind traits
         self.integration_layer = RecurrentLIFCortexLayer(128 + 128, 256)
         self.prefrontal_cortex = ExecutiveFrontalCortex(combined_sensory_dim=256, cognitive_dim=512)
         
-        # Visual Motor Strip: Maps Prefrontal thought (256) back identically to visual sensory width (1024 or 3072 depending on main init)
-        self.visual_motor_strip = LIFCortexLayer(256, visual_input_dim)
+        # Visual Decoder Lobe: Transforms deep semantic Prefrontal thought (256) hierarchically outwards toward 64x64 physical realities natively
+        self.visual_motor_strip = VisualMotorCortex(semantic_input_dim=256, target_hd_shape=(64, 64, 3))
 
     def forward(self, processed_vision_train, processed_audio_train):
         """
@@ -44,6 +45,21 @@ class BrainConnectome:
         imagined_visual_spikes = self.visual_motor_strip.forward(executive_decision)
         
         return response_spikes_broca, imagined_visual_spikes
+
+    def apply_plasticity_and_pruning(self, prune_threshold=0.005, grow_threshold=0.1):
+        pruned = 0.0
+        grown = 0.0
+        
+        for region in [self.visual_cortex, self.auditory_cortex, self.integration_layer, self.prefrontal_cortex, self.visual_motor_strip]:
+            if hasattr(region, 'prune'): pruned += region.prune(prune_threshold)
+            if hasattr(region, 'grow'): grown += region.grow(grow_threshold)
+            
+        return pruned, grown
+
+    def update_hebbian_traces(self):
+        for region in [self.visual_cortex, self.auditory_cortex, self.integration_layer, self.prefrontal_cortex, self.visual_motor_strip]:
+            if hasattr(region, 'update_hebbian_trace'):
+                region.update_hebbian_trace()
 
     def get_variables(self):
         return (self.visual_cortex.get_variables() + 
@@ -82,7 +98,7 @@ class BrainConnectome:
             os.makedirs(model_dir)
             
         config = {
-            "visual_input_dim": 3072,
+            "visual_input_dim": 12288,
             "auditory_input_dim": 256
         }
         
@@ -106,7 +122,7 @@ class BrainConnectome:
             config = json.load(f)
             
         # Natively reconstruct the explicit biological scaffolding
-        brain = cls(visual_input_dim=config.get("visual_input_dim", 3072), 
+        brain = cls(visual_input_dim=config.get("visual_input_dim", 12288), 
                     auditory_input_dim=config.get("auditory_input_dim", 256))
                     
         # Inject the physical synaptic bloodlines into the skeleton

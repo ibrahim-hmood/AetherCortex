@@ -11,7 +11,7 @@ class MotorDecoder:
     Inverse Tokenizer representing the Motor Strips and musculature.
     Translates Brain Spike trains back into Images, Video, Audio, and Text.
     """
-    def __init__(self, visual_decode_shape=(32, 32, 3)):
+    def __init__(self, visual_decode_shape=(64, 64, 3)):
         self.visual_decode_shape = visual_decode_shape
         self.flat_visual_dim = visual_decode_shape[0] * visual_decode_shape[1] * visual_decode_shape[2]
 
@@ -19,7 +19,9 @@ class MotorDecoder:
         """
         Collapses structural visual spikes across time into a single static image frame.
         """
-        firing_rates = tf.reduce_mean(visual_cortex_spikes, axis=1)[0]
+        # Diluting spikes across massive temporal bounds (75 frames) crushes them to black. 
+        # Using reduce_max performs biological 'light accumulation' (like a long camera exposure)
+        firing_rates = tf.reduce_max(visual_cortex_spikes, axis=1)[0]
         
         if tf.shape(firing_rates)[0] < self.flat_visual_dim:
             padded = tf.pad(firing_rates, [[0, self.flat_visual_dim - tf.shape(firing_rates)[0]]])
@@ -51,9 +53,16 @@ class MotorDecoder:
         upscale_dim = 256
         out = cv2.VideoWriter(filepath, fourcc, float(fps), (upscale_dim, upscale_dim))
         
+        # Biological Retinal Persistence (Hold light natively to fix rapid black flicker)
+        persistent_frame = np.zeros((upscale_dim, upscale_dim, 3), dtype=np.uint8)
+        
         for t in range(time_steps):
             frame_rates = visual_cortex_spikes[batch_idx, t, :]
             
+            # Skip physiological empty void (Latency during early brain computation propagation)
+            if tf.reduce_max(frame_rates) == 0.0:
+                continue
+                
             if tf.shape(frame_rates)[0] < self.flat_visual_dim:
                 padded = tf.pad(frame_rates, [[0, self.flat_visual_dim - tf.shape(frame_rates)[0]]])
             else:
@@ -65,7 +74,11 @@ class MotorDecoder:
             
             # Neuromuscular upscaling to preserve blocky shapes on the mp4
             upscaled_frame = cv2.resize(bgr_array, (upscale_dim, upscale_dim), interpolation=cv2.INTER_NEAREST)
-            out.write(upscaled_frame)
+            
+            # Blend current spike heavily into the decaying phosphor trace
+            persistent_frame = cv2.addWeighted(persistent_frame, 0.75, upscaled_frame, 0.8, 0)
+            
+            out.write(persistent_frame)
             
         out.release()
         print(f">> Generated Animation ({time_steps} frames) saved to {filepath}")

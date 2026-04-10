@@ -6,14 +6,15 @@ from brain.connectome import BrainConnectome
 import time
 
 def main():
-    TIME_STEPS = 15
+    # Massive temporal bounds for Generation (Allows long hallucination sequence passing the initial 14-frame layer delay)
+    TIME_STEPS = 75
 
     print("--- Biological Prompt Generation Boot Sequence ---")
-    loader = MultimediaLoader(visual_target_size=(32, 32))
-    tokenizer = SensoryTokenizer(visual_dim=3072, auditory_dim=256)
-    decoder = MotorDecoder(visual_decode_shape=(32, 32, 3))
+    loader = MultimediaLoader(visual_target_size=(64, 64))
+    tokenizer = SensoryTokenizer(visual_dim=12288, auditory_dim=256)
+    decoder = MotorDecoder(visual_decode_shape=(64, 64, 3))
     
-    print("> Initializing biological Connectome Topography...")
+    print("> Waking up Brain Connectome (Loading HD topology)...")
     brain = BrainConnectome.load_model("biological_model")
     
     print("\n--- Prompting Phase ---")
@@ -25,7 +26,7 @@ def main():
     text_spikes_t = tokenizer.thalamic_routing("text", prompt, time_steps=TIME_STEPS)
     
     # To force generation entirely from the prompt, we physically zero out the senses (blindfolding)
-    blind_visual = tf.zeros((1, TIME_STEPS, 3072), dtype=tf.float32)
+    blind_visual = tf.zeros((1, TIME_STEPS, 12288), dtype=tf.float32)
     blind_audio = tf.zeros((1, TIME_STEPS, 256), dtype=tf.float32)
     
     sensory_audio = text_spikes_t + blind_audio

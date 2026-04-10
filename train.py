@@ -52,8 +52,10 @@ def train():
     print("--- Biological Connectome Training Sequence ---")
     ensure_dummy_dataset()
     
-    loader = MultimediaLoader(visual_target_size=(32, 32))
-    tokenizer = SensoryTokenizer(visual_dim=3072, auditory_dim=256)
+    loader = MultimediaLoader(visual_target_size=(64, 64))
+    
+    # 64x64x3 = 12288 native dimensions
+    tokenizer = SensoryTokenizer(visual_dim=12288, auditory_dim=256)
     
     print("> Subconsciously loading Brain Connectome topography...")
     brain = BrainConnectome.load_model(MODEL_DIR)
@@ -68,7 +70,10 @@ def train():
     print("--- Beginning Continuous Learning Loop ---")
     
     #Ask the user for the number of epochs
-    epochs = int(input("How many epochs to train for? "))
+    epochs = input("How many epochs to train for? ")
+    if(epochs is None or epochs == ""):
+        epochs = 1000
+    epochs = int(epochs)
     for epoch in range(1, epochs + 1):
         epoch_loss = 0.0
         
@@ -100,8 +105,15 @@ def train():
                 epoch_loss += loss.numpy()
             
         print(f"Epoch {epoch}/{epochs} | Bio-Loss: {epoch_loss:.4f}")
+
         
-        # Periodically save structural traces
+        # Periodically save structural traces and enter deep sleep cycles
+        if(epoch % 5 == 0):
+            print("\n> Initiating Biological Deep Sleep (Synaptic Pruning & Hebbian Neurogenesis)...")
+            pruned_count, grown_count = brain.apply_plasticity_and_pruning(prune_threshold=0.005, grow_threshold=0.1)
+            print(f">> Eradicated {int(pruned_count)} dead synapses (Forgetting).")
+            print(f">> Spawned {int(grown_count)} new synapses (Learning).\n")
+            
         if epoch % 10 == 0:
             brain.save_model(MODEL_DIR)
             

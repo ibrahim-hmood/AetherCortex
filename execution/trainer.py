@@ -38,4 +38,8 @@ class BrainTrainer:
         trainable_vars = self.brain.get_variables()
         gradients = tape.gradient(total_loss, trainable_vars)
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        
+        # decoupled plasticity: Update traces outside the massive inference loop
+        self.brain.update_hebbian_traces()
+        
         return total_loss, brocas_spikes, visual_spikes
