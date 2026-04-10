@@ -1,5 +1,10 @@
-versions
-versions/
-dataset
-dataset/
-__pycache__/
+/versions/
+/dataset/
+/__pycache__/
+/biological_model/
+/versions/
+*.mp4
+*.png
+*.npy
+*.wav
+*.zip
