@@ -88,19 +88,71 @@ class MotorDecoder:
         print(f">> Generated Animation ({time_steps} frames) saved to {filepath}")
 
     def decode_to_text(self, brocas_spikes):
-        """Translates language spikes back to ASCII text via neuron identities."""
-        # Identification: Which neurons fired? (Peak detection across the thought)
-        firing_rates = tf.reduce_max(brocas_spikes, axis=1)[0]
-        
-        generated_string = ""
-        # In a biological one-hot mapping, the neuron index IS the character identity
-        # Neuron 65 firing = the brain is thinking the character 'A'
-        rates_np = firing_rates.numpy()
-        for i in range(len(rates_np)):
-            if rates_np[i] > 0.5:
-                if 32 <= i <= 126:
-                    generated_string += chr(i)
-        return generated_string
+        """
+        ADAPTIVE BIOMIMETIC DECODER:
+        Detects the current firing regime and reads accordingly.
+
+        BURST / RATE-CODING MODE  (early training, bag-coded weights):
+          Neurons fire in a dense cloud across all time steps.  The decoder
+          collapses across time and reads the printable ASCII neurons in
+          dominance order (most-active first).  This recovers the babble that
+          was working before, but now sorted by strength instead of by index.
+
+        SEQUENTIAL / TEMPORAL MODE  (after sequential training converges):
+          Broca's area fires one phoneme per time-step.  The decoder reads
+          left-to-right, takes the printable-range Winner-Take-All at each
+          step, and merges consecutive duplicates (held phonemes).
+
+        The transition is automatic: fewer than 4 neurons firing per step on
+        average means the sequential regime has emerged.
+        """
+        # brocas_spikes: [batch, time_steps, num_neurons]
+        spikes_t  = brocas_spikes[0]          # [time_steps, num_neurons]
+        rates_np  = spikes_t.numpy()          # eager, values are 0.0 or 1.0
+
+        # --- Regime detection -------------------------------------------
+        avg_active = float((rates_np > 0.5).sum(axis=1).mean())
+
+        if avg_active <= 4.0:
+            # ── SEQUENTIAL (TEMPORAL WTA) ──────────────────────────────
+            # Only look within printable ASCII (32-126) for the winner.
+            generated = ""
+            last_char = None
+            for t in range(rates_np.shape[0]):
+                printable = rates_np[t, 32:127]          # slice to printable range
+                if len(printable) == 0:
+                    continue
+                max_rate = float(printable.max())
+                if max_rate > 0.5:
+                    # argmax within the printable slice → offset back to full index
+                    winner_idx = int(np.argmax(printable)) + 32
+                    char = chr(winner_idx)
+                    if char != last_char:                # merge held phonemes
+                        generated += char
+                    last_char = char
+                else:
+                    last_char = None                     # silence resets hold
+            return generated
+
+        else:
+            # ── BURST / RATE-CODING ────────────────────────────────────
+            # Aggregate how often each neuron fired across all time steps.
+            # This gives a firing-rate vector for each neuron.
+            mean_rates = rates_np.mean(axis=0)           # [num_neurons]
+            printable_rates = mean_rates[32:127]         # only printable ASCII
+
+            # Sort by dominance (highest firing neuron first).
+            ranked_local = np.argsort(printable_rates)[::-1]
+            generated = ""
+            for local_idx in ranked_local:
+                if printable_rates[local_idx] > 0.01:   # any activity at all
+                    generated += chr(int(local_idx) + 32)
+                else:
+                    break
+                if len(generated) >= 32:                 # reasonable cap
+                    break
+            return generated
+
 
     def decode_to_audio(self, brocas_spikes, filepath="generated_speech.wav", sample_rate=44100):
         """

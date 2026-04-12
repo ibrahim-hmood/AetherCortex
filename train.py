@@ -87,9 +87,8 @@ def build_sensory_dataset(loader, tokenizer, basenames, time_steps):
                         # BIOMIMETIC READING: Route the text visually as letter-shapes
                         vis_t = tokenizer.thalamic_routing("text", p_str, time_steps=time_steps)
                         
-                        # The Target remains the Speech/ASCII representation for the Motor cortex
-                        aud_targ = tokenizer.process_text_as_audio(t_str, time_steps=time_steps)
-                        targ = tf.reduce_mean(aud_targ, axis=1)
+                        # The Target is the sequential speech spike train for T+1 text
+                        targ = tokenizer.process_text_as_audio(t_str, time_steps=time_steps)
                         
                         # No external sound during reading
                         aud_t = tf.zeros((1, time_steps, 256), dtype=tf.float32)
@@ -98,9 +97,8 @@ def build_sensory_dataset(loader, tokenizer, basenames, time_steps):
 
             # --- TRADITIONAL CROSS-MODAL LABELING ---
             text_str = base
-            # Use ASCII for target prediction (Motor mapping)
-            aud_targ = tokenizer.process_text_as_audio(text_str, time_steps=time_steps)
-            targ = tf.reduce_mean(aud_targ, axis=1)
+            # Sequential speech target: each char fires at its own time step
+            targ = tokenizer.process_text_as_audio(text_str, time_steps=time_steps)
             
             # External sound is zero
             aud_t = tf.zeros((1, time_steps, 256), dtype=tf.float32)
@@ -119,7 +117,7 @@ def build_sensory_dataset(loader, tokenizer, basenames, time_steps):
     sig = (
         tf.TensorSpec(shape=(1, time_steps, 12288), dtype=tf.float32),
         tf.TensorSpec(shape=(1, time_steps, 256), dtype=tf.float32),
-        tf.TensorSpec(shape=(1, 256), dtype=tf.float32)
+        tf.TensorSpec(shape=(1, time_steps, 256), dtype=tf.float32)  # Sequential speech target
     )
     # Autotune creates an asynchronous pipeline on the CPU, feeding the Edge GPU relentlessly
     return tf.data.Dataset.from_generator(gen, output_signature=sig).prefetch(tf.data.AUTOTUNE)
@@ -187,8 +185,7 @@ def train():
                                 t_str += " " * (len(p_str) - len(t_str))
                             
                             vis_t = tokenizer.thalamic_routing("text", p_str, time_steps=TIME_STEPS)
-                            aud_targ = tokenizer.process_text_as_audio(t_str, time_steps=TIME_STEPS)
-                            targ = tf.reduce_mean(aud_targ, axis=1)
+                            targ = tokenizer.process_text_as_audio(t_str, time_steps=TIME_STEPS)
                             
                             aud_t = tf.zeros((1, TIME_STEPS, 256), dtype=tf.float32)
                             
@@ -199,9 +196,8 @@ def train():
 
                 # --- CROSS-MODAL VISUAL LABELING ---
                 text_str = base
-                # Speech Target
-                aud_targ = tokenizer.process_text_as_audio(text_str, time_steps=TIME_STEPS)
-                targ = tf.reduce_mean(aud_targ, axis=1)
+                # Sequential speech target
+                targ = tokenizer.process_text_as_audio(text_str, time_steps=TIME_STEPS)
                 
                 aud_t = tf.zeros((1, TIME_STEPS, 256), dtype=tf.float32)
                 

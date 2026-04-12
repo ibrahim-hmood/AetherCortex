@@ -2,7 +2,10 @@ import tensorflow as tf
 import numpy as np
 import argparse
 import time
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 
 from tokenizer.sensory_tokenizer import SensoryTokenizer
 from data_ingestion.multimedia_loader import MultimediaLoader
@@ -137,8 +140,9 @@ def main():
             
             img_arr = decoder.decode_to_image(visual_out, filepath="temp.png")
             
-            # Organically blend the visual motor thought onto the actual physical canvas
-            canvas[y_off:y_off+64, x_off:x_off+64] = cv2.addWeighted(canvas[y_off:y_off+64, x_off:x_off+64], 0.3, img_arr, 0.7, 0)
+            if cv2 is not None:
+                # Organically blend the visual motor thought onto the actual physical canvas
+                canvas[y_off:y_off+64, x_off:x_off+64] = cv2.addWeighted(canvas[y_off:y_off+64, x_off:x_off+64], 0.3, img_arr, 0.7, 0)
             
             # Motor cortex drives purely abstract coordinate translation
             motor_x = tf.reduce_mean(brocas_out) * 5.0 - 2.5
@@ -146,8 +150,11 @@ def main():
             current_fovea_x = float(motor_x)
             current_fovea_y = float(motor_y)
             
-        cv2.imwrite("saccadic_drawing.png", cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))
-        print("\n>> Active Inference Drawing preserved natively in saccadic_drawing.png")
+        if cv2 is not None:
+            cv2.imwrite("saccadic_drawing.png", cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))
+            print("\n>> Active Inference Drawing preserved natively in saccadic_drawing.png")
+        else:
+            print("\n>> Skip saving saccadic_drawing.png (cv2 missing)")
 
 if __name__ == "__main__":
     main()

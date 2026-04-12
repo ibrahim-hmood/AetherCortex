@@ -102,20 +102,24 @@ class SensoryTokenizer:
 
     def process_text_as_audio(self, text_string, time_steps):
         """
-        Subvocalization/Hearing: Converts text directly to auditory ASCII spikes.
-        Used for the phonological loop and hearing your own voice.
+        BIOMIMETIC SEQUENTIAL SUBVOCALIZATION:
+        Maps each character to its own dedicated time step, mirroring how Broca's
+        area fires motor commands for phonemes one at a time, not all at once.
+        At time step T, only the neuron whose index equals the ASCII value of the
+        T-th character fires. This is the correct biological target for the decoder.
+        
+        Shape: [1, time_steps, auditory_dim]
         """
-        # ONE-HOT SPIKING MAPPING: Character index 65 (A) triggers Neuron 65.
-        spikes = np.zeros(self.auditory_dim, dtype=np.float32)
-        for i, char in enumerate(text_string):
-            if i < self.auditory_dim:
-                ascii_val = ord(char)
-                if ascii_val < self.auditory_dim:
-                    # In this biological simulation, each neuron index maps to an ASCII identity
-                    spikes[ascii_val] = 1.0
-                    
-        batch_audio = tf.expand_dims(tf.convert_to_tensor(spikes), 0)
-        return tf.repeat(tf.expand_dims(batch_audio, 1), time_steps, axis=1)
+        # One spike per time step: spikes[t, ascii(char_t)] = 1.0
+        spikes = np.zeros((time_steps, self.auditory_dim), dtype=np.float32)
+        for t, char in enumerate(text_string):
+            if t >= time_steps:
+                break
+            ascii_val = ord(char)
+            if ascii_val < self.auditory_dim:
+                spikes[t, ascii_val] = 1.0
+
+        return tf.expand_dims(tf.convert_to_tensor(spikes), 0)  # [1, time_steps, auditory_dim]
 
     def thalamic_routing(self, sensory_type, raw_data, time_steps=15):
         if sensory_type == "vision":

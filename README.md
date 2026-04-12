@@ -11,6 +11,15 @@ The model relies entirely on **Predictive Coding** and biological inference.
 4. **Prefrontal Cortex (Attention via Recurrence)**: Features are bound through Top-Down Recurrence (`RecurrentLIFCortexLayer`). Natively circulating energy locally allows adjectives ("Green", "Red") to accurately lock their bindings natively to structural components over biological Time (`15 T-Steps`).
 5. **Generative Cross-Modal Routes**: Output from the Prefrontal loop projects heavily **backwards** onto the visual motor strip, permitting the engine to actively "hallucinate" videos/pixels that match its internal conceptual semantic mapping!
 
+## Specialized Biological Features
+
+Unlike standard ANN models, this system implements several "hard" biological constraints:
+
+*   **Structural Neuroplasticity (Sleep Phase)**: Every 5 epochs, the system enters a "Deep Sleep" cycle. It permanently **prunes** weak, noisy synapses (Forgetting) and **spawns** new synaptic wires in areas of high inter-modal firing demand (Learning).
+*   **Metabolic Austerity (ATP Budgeting)**: Firing spikes is energetically expensive. The model operates under a **Metabolic Cost Penalty**, forcing it to find the sparsest, most efficient path to solve a problem—exactly like a calorie-restricted living brain.
+*   **Sequential Phoneme Timing**: The model doesn't process text as a "block." It reads and speaks chronologically, one character per biological time-step. This mirrors the real-time motor control required for human speech.
+*   **Competitive Inhibition (GABA Tone)**: Localized suppression fields prevent neural runaway. Neurons must fight to overcome neighboring inhibition, ensuring that only the highest-clarity features are promoted to higher thought.
+
 ## What is this Useful For?
 * **Organic General Intelligence Research**: Understanding how pure spatial clustering and predictive coding can replicate standard Transformer math via pure voltage integration loops.
 * **Neuromorphic Hardware Engineering**: Because code is structured on discrete biological ticks and simple LIF potential summations, this model perfectly translates onto extreme low-power Spiking chips (like IBM TrueNorth or Intel Loihi) executing at massive speeds for almost ~0 Watts.

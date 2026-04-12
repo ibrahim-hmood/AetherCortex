@@ -39,12 +39,17 @@ class LIFCortexLayer:
         
         active_weights = self.weights * self.synaptic_mask
 
+        # TEMPORAL VECTORIZATION: Pre-calculate the entire sensory stream projection at once.
+        # Projecting [Batch, Time, Input] -> [Batch, Time, Neurons] via flattened matmul.
+        flat_inputs = tf.reshape(inputs, [-1, self.input_size])
+        all_projections = tf.matmul(flat_inputs, active_weights) + self.biases
+        all_projections = tf.reshape(all_projections, [batch_size, time_steps, self.num_neurons])
+
         for t in tf.range(time_steps):
             tf.autograph.experimental.set_loop_options(
                 shape_invariants=[(v_mem, tf.TensorShape([None, self.num_neurons]))]
             )
-            x_t = inputs[:, t, :]
-            current_input = tf.matmul(x_t, active_weights) + self.biases
+            current_input = all_projections[:, t, :]
             
             # --- BIOLOGICAL SYNAPTIC JITTER ---
             # Prevents neural deadlock by vibrating potentials closer to the threshold.
@@ -57,7 +62,7 @@ class LIFCortexLayer:
             # --- LATERAL INHIBITION ---
             spikes_t_minus_1 = spike_trains.read(t-1) if t > 0 else tf.zeros((batch_size, self.num_neurons))
             spikes_t_minus_1 = tf.reshape(spikes_t_minus_1, [batch_size, self.num_neurons])
-            inhibition = tf.reduce_mean(spikes_t_minus_1, axis=1, keepdims=True) * 0.1 
+            inhibition = tf.reduce_mean(spikes_t_minus_1, axis=1, keepdims=True) * 0.25 
             v_mem = v_mem - inhibition
             
             spikes = surrogate_spike(v_mem, self.threshold)
@@ -148,12 +153,17 @@ class ConvLIFCortexLayer:
         spike_trains = tf.TensorArray(tf.float32, size=time_steps)
         active_weights = self.weights * self.synaptic_mask
         
+        # TEMPORAL CONVOLUTIONAL VECTORIZATION: Pre-calculate the entire sensory stream.
+        # Reshape [Batch, Time, H, W, C] -> [Batch * Time, H, W, C] for one large conv pass.
+        flat_spatial = tf.reshape(spatial_inputs, [-1, self.input_shape[0], self.input_shape[1], self.input_shape[2]])
+        all_conv_currents = tf.nn.conv2d(flat_spatial, active_weights, strides=[1, self.stride, self.stride, 1], padding="SAME") + self.biases
+        all_conv_currents = tf.reshape(all_conv_currents, [batch_size, time_steps, out_h, out_w, self.filters])
+
         for t in tf.range(time_steps):
             tf.autograph.experimental.set_loop_options(
                 shape_invariants=[(v_mem, tf.TensorShape([None, out_h, out_w, self.filters]))]
             )
-            x_t = spatial_inputs[:, t, :, :, :]
-            current_input = tf.nn.conv2d(x_t, active_weights, strides=[1, self.stride, self.stride, 1], padding="SAME") + self.biases
+            current_input = all_conv_currents[:, t, :, :, :]
             
             if self.noise_std > 0:
                 noise = tf.random.normal(shape=tf.shape(v_mem), mean=0.0, stddev=self.noise_std)
@@ -165,9 +175,9 @@ class ConvLIFCortexLayer:
             if t > 0:
                 spikes_t_minus_1 = spike_trains.read(t-1)
                 spikes_t_minus_1 = tf.reshape(spikes_t_minus_1, [batch_size, out_h, out_w, self.filters])
-                # Geometric smear suppressors (Contrast Sharpening)
+                # --- SPATIAL LATERAL INHIBITION (Contrast Sharpening) ---
                 blur = tf.nn.avg_pool2d(spikes_t_minus_1, ksize=3, strides=1, padding="SAME")
-                v_mem = v_mem - (blur * 0.1)
+                v_mem = v_mem - (blur * 0.25)
             
             spikes = surrogate_spike(v_mem, self.threshold)
             v_mem = v_mem - (self.threshold * spikes)
@@ -245,6 +255,11 @@ class RecurrentLIFCortexLayer(LIFCortexLayer):
         active_weights = self.weights * self.synaptic_mask
         active_recurrent_weights = self.recurrent_weights * self.recurrent_synaptic_mask
 
+        # TEMPORAL SENSORY VECTORIZATION: Pre-project the feedforward stream.
+        flat_inputs = tf.reshape(inputs, [-1, self.input_size])
+        all_ff_projections = tf.matmul(flat_inputs, active_weights)
+        all_ff_projections = tf.reshape(all_ff_projections, [batch_size, time_steps, self.num_neurons])
+
         for t in tf.range(time_steps):
             tf.autograph.experimental.set_loop_options(
                 shape_invariants=[
@@ -252,8 +267,7 @@ class RecurrentLIFCortexLayer(LIFCortexLayer):
                     (prev_spikes, tf.TensorShape([None, self.num_neurons]))
                 ]
             )
-            x_t = inputs[:, t, :]
-            feedforward_input = tf.matmul(x_t, active_weights)
+            feedforward_input = all_ff_projections[:, t, :]
             recurrent_input = tf.matmul(prev_spikes, active_recurrent_weights)
             current_input = feedforward_input + recurrent_input + self.biases
             
@@ -265,7 +279,7 @@ class RecurrentLIFCortexLayer(LIFCortexLayer):
             
             # Lateral Inhibition
             prev_spikes = tf.reshape(prev_spikes, [batch_size, self.num_neurons])
-            inhibition = tf.reduce_mean(prev_spikes, axis=1, keepdims=True) * 0.1 
+            inhibition = tf.reduce_mean(prev_spikes, axis=1, keepdims=True) * 0.25 
             v_mem = v_mem - inhibition
             
             spikes = surrogate_spike(v_mem, self.threshold)
@@ -359,15 +373,18 @@ class DeconvLIFCortexLayer:
         spike_trains = tf.TensorArray(tf.float32, size=time_steps)
         active_weights = self.weights * self.synaptic_mask
         
+        # TEMPORAL DECONVOLUTIONAL VECTORIZATION: Pre-calculate the entire motor stream.
+        flat_p_inputs = tf.reshape(spatial_inputs, [-1, self.input_shape[0], self.input_shape[1], self.input_shape[2]])
+        output_full_shape = [batch_size * time_steps, out_h, out_w, self.filters]
+        
+        all_deconv_currents = tf.nn.conv2d_transpose(flat_p_inputs, active_weights, output_shape=output_full_shape, strides=[1, self.stride, self.stride, 1], padding="SAME") + self.biases
+        all_deconv_currents = tf.reshape(all_deconv_currents, [batch_size, time_steps, out_h, out_w, self.filters])
+
         for t in tf.range(time_steps):
             tf.autograph.experimental.set_loop_options(
                 shape_invariants=[(v_mem, tf.TensorShape([None, out_h, out_w, self.filters]))]
             )
-            x_t = spatial_inputs[:, t, :, :, :]
-            output_shape = [batch_size, out_h, out_w, self.filters]
-            
-            # Cortical Extrapolation: Firing backwards mechanically extrapolates data outward structurally grids.
-            current_input = tf.nn.conv2d_transpose(x_t, active_weights, output_shape=output_shape, strides=[1, self.stride, self.stride, 1], padding="SAME") + self.biases
+            current_input = all_deconv_currents[:, t, :, :, :]
             
             if self.noise_std > 0:
                 noise = tf.random.normal(shape=tf.shape(v_mem), mean=0.0, stddev=self.noise_std)
@@ -380,7 +397,7 @@ class DeconvLIFCortexLayer:
                 spikes_t_minus_1 = spike_trains.read(t-1)
                 spikes_t_minus_1 = tf.reshape(spikes_t_minus_1, [batch_size, out_h, out_w, self.filters])
                 blur = tf.nn.avg_pool2d(spikes_t_minus_1, ksize=3, strides=1, padding="SAME")
-                v_mem = v_mem - (blur * 0.1)
+                v_mem = v_mem - (blur * 0.25)
             
             spikes = surrogate_spike(v_mem, self.threshold)
             v_mem = v_mem - (self.threshold * spikes)
