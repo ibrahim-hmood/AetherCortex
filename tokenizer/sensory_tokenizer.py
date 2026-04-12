@@ -1,4 +1,9 @@
 import tensorflow as tf
+import numpy as np
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 
 class SensoryTokenizer:
     """
@@ -55,10 +60,62 @@ class SensoryTokenizer:
         batch_audio = tf.expand_dims(audio, 0)
         return tf.repeat(tf.expand_dims(batch_audio, 1), time_steps, axis=1)
 
+    def process_text_visually(self, text_string, time_steps):
+        """
+        BIOMIMETIC READING: Renders text as a rolling visual sequence.
+        This allows the Visual Cortex to scan characters over time.
+        """
+        if cv2 is None:
+            # Fallback to zeros if cv2 missing
+            return tf.zeros((1, time_steps, self.visual_dim), dtype=tf.float32)
+
+        # Create a single long strip for the entire text
+        char_w = 25
+        canvas_width = max(64, len(text_string) * char_w + 128)
+        canvas_height = 64
+        strip = np.zeros((canvas_height, canvas_width, 1), dtype=np.uint8)
+        
+        # Draw the text centrally on the strip
+        cv2.putText(strip, text_string, (64, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 255, 2)
+        
+        processed_frames = []
+        # The text scrolls from right to left across the 64x64 window
+        total_scroll = canvas_width - 64
+        shift_per_step = total_scroll / time_steps if time_steps > 1 else 0
+        
+        for t in range(time_steps):
+            x_start = int(t * shift_per_step)
+            frame_gray = strip[:, x_start:x_start+64]
+            # Convert to RGB to match the visual cortex input format
+            frame_rgb = cv2.cvtColor(frame_gray, cv2.COLOR_GRAY2RGB)
+            
+            flat = tf.reshape(tf.cast(frame_rgb, tf.float32), [-1]) / 255.0
+            current_len = tf.shape(flat)[0]
+            if current_len < self.visual_dim:
+                flat = tf.pad(flat, [[0, self.visual_dim - current_len]])
+            else:
+                flat = flat[:self.visual_dim]
+            processed_frames.append(flat)
+            
+        stacked = tf.stack(processed_frames)
+        return tf.expand_dims(stacked, 0)
+
     def process_text_as_audio(self, text_string, time_steps):
-        ascii_vals = [float(ord(c)) for c in text_string]
-        simulated_audio = tf.constant(ascii_vals, dtype=tf.float32) / 255.0 
-        return self.process_audio(simulated_audio, time_steps)
+        """
+        Subvocalization/Hearing: Converts text directly to auditory ASCII spikes.
+        Used for the phonological loop and hearing your own voice.
+        """
+        # ONE-HOT SPIKING MAPPING: Character index 65 (A) triggers Neuron 65.
+        spikes = np.zeros(self.auditory_dim, dtype=np.float32)
+        for i, char in enumerate(text_string):
+            if i < self.auditory_dim:
+                ascii_val = ord(char)
+                if ascii_val < self.auditory_dim:
+                    # In this biological simulation, each neuron index maps to an ASCII identity
+                    spikes[ascii_val] = 1.0
+                    
+        batch_audio = tf.expand_dims(tf.convert_to_tensor(spikes), 0)
+        return tf.repeat(tf.expand_dims(batch_audio, 1), time_steps, axis=1)
 
     def thalamic_routing(self, sensory_type, raw_data, time_steps=15):
         if sensory_type == "vision":
@@ -68,6 +125,8 @@ class SensoryTokenizer:
         elif sensory_type == "audio":
             return self.process_audio(raw_data, time_steps)
         elif sensory_type == "text":
+            return self.process_text_visually(raw_data, time_steps)
+        elif sensory_type == "audio_text":
             return self.process_text_as_audio(raw_data, time_steps)
         else:
             raise ValueError("Unknown sensory type.")

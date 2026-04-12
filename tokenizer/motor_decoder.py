@@ -15,13 +15,15 @@ class MotorDecoder:
         self.visual_decode_shape = visual_decode_shape
         self.flat_visual_dim = visual_decode_shape[0] * visual_decode_shape[1] * visual_decode_shape[2]
 
-    def decode_to_image(self, visual_cortex_spikes, filepath="generated_output.png"):
+    def decode_to_image(self, visual_cortex_spikes, filepath="generated_output.png", gain=2.0):
         """
         Collapses structural visual spikes across time into a single static image frame.
         """
-        # Diluting spikes across massive temporal bounds (75 frames) crushes them to black. 
-        # Using reduce_max performs biological 'light accumulation' (like a long camera exposure)
+        # Using reduce_max performs biological 'light accumulation'
         firing_rates = tf.reduce_max(visual_cortex_spikes, axis=1)[0]
+        
+        # Apply Motor Gain to ensure sparse spikes are visible
+        firing_rates = firing_rates * gain
         
         if tf.shape(firing_rates)[0] < self.flat_visual_dim:
             padded = tf.pad(firing_rates, [[0, self.flat_visual_dim - tf.shape(firing_rates)[0]]])
@@ -29,12 +31,14 @@ class MotorDecoder:
             padded = firing_rates[:self.flat_visual_dim]
             
         img_tensor = tf.reshape(padded, self.visual_decode_shape)
+        # Clip to ensure intensities don't overflow
+        img_tensor = tf.clip_by_value(img_tensor, 0.0, 1.0)
         img_array = tf.cast(img_tensor * 255.0, tf.uint8).numpy()
         
         if cv2 is not None:
             bgr_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
             cv2.imwrite(filepath, bgr_array)
-            print(f">> Generated Static Image saved to {filepath}")
+            print(f">> Generated Static Image (Gain {gain}) saved to {filepath}")
         return img_array
 
     def decode_to_video(self, visual_cortex_spikes, filepath="generated_animation.mp4", fps=5):
@@ -84,14 +88,18 @@ class MotorDecoder:
         print(f">> Generated Animation ({time_steps} frames) saved to {filepath}")
 
     def decode_to_text(self, brocas_spikes):
-        """Translates language spikes back to ASCII text."""
-        firing_rates = tf.reduce_mean(brocas_spikes, axis=1)[0]
-        ascii_values = tf.cast(firing_rates * 255.0, tf.int32).numpy()
+        """Translates language spikes back to ASCII text via neuron identities."""
+        # Identification: Which neurons fired? (Peak detection across the thought)
+        firing_rates = tf.reduce_max(brocas_spikes, axis=1)[0]
         
         generated_string = ""
-        for val in ascii_values:
-            if 32 <= val <= 126:
-                generated_string += chr(val)
+        # In a biological one-hot mapping, the neuron index IS the character identity
+        # Neuron 65 firing = the brain is thinking the character 'A'
+        rates_np = firing_rates.numpy()
+        for i in range(len(rates_np)):
+            if rates_np[i] > 0.5:
+                if 32 <= i <= 126:
+                    generated_string += chr(i)
         return generated_string
 
     def decode_to_audio(self, brocas_spikes, filepath="generated_speech.wav", sample_rate=44100):
