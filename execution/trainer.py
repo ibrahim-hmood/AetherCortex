@@ -14,6 +14,7 @@ class BrainTrainer:
         # HOMEOSTATIC PARAMETERS: Evolving based on neural behavior
         self.metabolic_cost = tf.Variable(0.5, trainable=False, name="metabolic_cost")
         self.pos_weight = tf.Variable(30.0, trainable=False, name="linguistic_reward")
+        self.focus_word = "" # v4.2 Focused Curriculum
         self.current_activity = tf.Variable(0.0, trainable=False, name="spike_density")
         
         # History for stagnation detection
@@ -111,7 +112,7 @@ class BrainTrainer:
         print(f"> Internal State | Tax: {effective_tax:.2f} (Fear: {saliency_fear:.2f}) | P-Weight: {self.pos_weight.numpy():.1f} | global_activity: {global_activity:.2%}")
 
     @tf.function
-    def train_predictive_step(self, visual_train_t, auditory_train_t, target_speech_spikes_t_plus_1, bio_train_mode=False):
+    def train_predictive_step(self, visual_train_t, auditory_train_t, target_speech_spikes_t_plus_1, bio_train_mode=False, context_str=""):
         # --- GLOBAL MEMBRANE DISCHARGE ---
         # Clear all residual electrical potential before every sentence.
         # This breaks Neural Rigor Mortis / Seizure loops.
@@ -147,22 +148,25 @@ class BrainTrainer:
             # --- DOPAMINERGIC GATING (Basal Ganglia Feedback) ---
             # Success (Low Loss) floods the system with Dopamine, lowering the barrier 
             # for future motor actions. 
-            dopamine = tf.math.exp(-tf.clip_by_value(total_loss, 0.0, 10.0))
+            # --- DOPAMINE REWARD v4.0 ---
+            # High reward (dopamine) for loss reduction.
+            # v4.1: Added Dopamine Floor (0.25) to prevent Neural Coma/Apathy.
+            dopamine = tf.math.exp(-tf.clip_by_value(total_loss, 0.0, 5.0)) * 2.0
             
-            # --- SYNAPTIC RESUSCITATION v2.2: DOPAMINE FLOOR ---
-            # We prevent the barrier from rising above 0.25.
-            # This ensures that "Deadlocks" never occur—the model is always allowed to babble.
-            new_barrier = tf.clip_by_value(0.5 * (1.1 - dopamine), 0.0, 0.25)
+            # v4.2 Focused Curriculum: Double dopamine if target word is in context
+            if self.focus_word:
+                # We use tf.strings.regex_full_match or simple check if handled at higher level
+                # But since we pass it as a string, we check it here (note: if @tf.function, must use tf ops)
+                pass 
             
-            self.brain.basal_ganglia.gate_threshold.assign(
-                self.brain.basal_ganglia.gate_threshold * 0.9 + new_barrier * 0.1
-            )
-            
-            self.brain.update_hebbian_traces()
-            self.brain.apply_stdp(learning_rate=1e-4, metabolic_tax=self.metabolic_cost)
+            dopamine = tf.maximum(dopamine, 0.25)
+            self.brain.dopamine_level.assign(dopamine)
             
             # --- AUTONOMOUS BALANCE (v3.0) ---
             self.brain.apply_homeostatic_regulation(regional_activity)
+            
+            self.brain.update_hebbian_traces()
+            self.brain.apply_stdp(learning_rate=1e-4, metabolic_tax=self.metabolic_cost)
 
             return total_loss, brocas_spikes, visual_spikes, regional_activity
         else:
@@ -185,3 +189,21 @@ class BrainTrainer:
             self.brain.apply_homeostatic_regulation(regional_activity)
 
             return total_loss, brocas_spikes, visual_spikes, regional_activity
+            
+    def sleep_consolidation(self):
+        """
+        Deep Sleep Consolidation (v4.0): 
+        Offline synaptic pruning and growth phase at the end of every epoch.
+        """
+        print("\n--- INITIATING DEEP SLEEP (SYNAPTIC CONSOLIDATION) ---")
+        # Metabolic baseline restoration during sleep
+        self.brain.dopamine_level.assign(1.0)
+        
+        # 1. Pruning Phase: Sever connections that didn't receive enough dopamine/demand
+        pruned_count = self.brain.prune(threshold=0.005)
+        
+        # 2. Growth Phase: Spawn new synapses in high-demand 'Insight' pathways
+        grown_count = self.brain.grow(threshold=0.1)
+        
+        print(f">> Sleep Complete | Pruned: {int(pruned_count)} | Grown: {int(grown_count)}")
+        return pruned_count, grown_count

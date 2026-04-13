@@ -59,15 +59,17 @@ class NeuralStreamer:
             self.connected = False
             print(f">>> [Diagnostics] Monitor server not detected. GUI disabled.")
 
-    def stream_state(self, regional_activity, context_text="Thinking...", mode="training"):
+    def stream_state(self, regional_activity, permanence_map=None, context_text="Thinking...", mode="training"):
         if not self.connected or not self.sio:
             return
             
         # Convert all Tensors to floats before sending
         clean_activity = self._convert_tensors(regional_activity)
+        clean_permanence = self._convert_tensors(permanence_map) if permanence_map else {}
             
         data = {
             "activity": clean_activity,
+            "permanence": clean_permanence,
             "context": str(context_text),
             "mode": mode,
             "timestamp": time.time()

@@ -1,4 +1,4 @@
-from core.neuron import LIFCortexLayer, SubCortexNetwork
+from core.neuron import LIFCortexLayer, RecurrentLIFCortexLayer, SubCortexNetwork
 
 class TemporalLobe:
     """
@@ -11,8 +11,9 @@ class TemporalLobe:
         self.primary_auditory.add_layer(LIFCortexLayer(auditory_dim, internal_dim, threshold=threshold, noise_std=noise_std, init_stddev=init_stddev, persistence=persistence))
         
         # Wernicke's Area: High-level comprehension & semantic feature extraction
+        # UPGRADE v4.0: Recurrent Splicing for semantic persistence
         self.wernickes_area = SubCortexNetwork(name="Wernicke's Area")
-        self.wernickes_area.add_layer(LIFCortexLayer(internal_dim, internal_dim, threshold=threshold * 0.9, noise_std=noise_std, init_stddev=init_stddev, persistence=persistence))
+        self.wernickes_area.add_layer(RecurrentLIFCortexLayer(internal_dim, internal_dim, threshold=threshold * 0.9, noise_std=noise_std, init_stddev=init_stddev, facilitation=True))
 
     def process_comprehension(self, auditory_input_spike_train, feedback_input=None):
         """Processes sound into semantic thoughts for the Parietal Hub"""

@@ -36,6 +36,10 @@ class LIFCortexLayer:
         # Eligibility trace accumulation for Sleep Spawning (By-passes TF graph scope tracing limitations)
         self.hebbian_trace = tf.Variable(initial_value=tf.zeros_like(self.weights), trainable=False, name="hebbian_trace")
         
+        # --- LONG TERM MEMORY (Myelination v4.1) ---
+        # Tracks synaptic durability. High permanence protects from pruning.
+        self.permanence = tf.Variable(initial_value=tf.zeros_like(self.weights), trainable=False, name="synaptic_permanence")
+        
         # BIOLOGICAL PERSISTENCE: State variables for temporal continuity and fatigue
         self.v_mem = tf.Variable(initial_value=tf.zeros((1, num_neurons)), trainable=False, name="membrane_state")
         self.t_state = tf.Variable(initial_value=tf.ones((1, num_neurons)) * threshold, trainable=False, name="dynamic_threshold")
@@ -161,14 +165,15 @@ class LIFCortexLayer:
             demand = tf.expand_dims(self.last_input_rate, 1) * tf.expand_dims(self.last_output_rate, 0)
             self.hebbian_trace.assign_add(demand)
 
-    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0):
+    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0, dopamine=1.0):
         """ 
         Strictly decoupled, biologically plausible local synaptic update. 
-        Implements Homeostatic Synaptic Scaling to prevent seizures.
+        Modulated by global dopamine levels (Reward-Directed Plasticity).
         """
         # 1. Sign-Aware Hebbian Update (Maintenance of E/I balance)
-        # Inhibitory synapses (negative) are strengthened (made more negative) by correlation
-        effective_lr = learning_rate * tf.sign(self.weights)
+        # Dopamine multiplier enhances plasticity during 'Meaningful' moments.
+        reward_modulated_lr = learning_rate * dopamine
+        effective_lr = reward_modulated_lr * tf.sign(self.weights)
         
         # 2. Austerity Decay: Metabolic tax physically starves noisy synapses
         # Synaptic Tagging: Active synapses (high trace) resist decay (min_decay_multiplier)
@@ -178,6 +183,17 @@ class LIFCortexLayer:
         
         delta = (effective_lr * self.hebbian_trace) - (actual_decay * self.weights)
         self.weights.assign_add(delta * self.synaptic_mask)
+
+        # --- SYNAPTIC PERMANENCE (LTM Archiving) ---
+        # Myelination: If reward is high, grow permanence (lock-in)
+        # Gold Medal Threshold: 1.5 (Aha! moments)
+        myelin_growth = tf.where(dopamine > 1.5, self.hebbian_trace * 0.05, tf.zeros_like(self.hebbian_trace))
+        
+        # Demyelination: If apathy is sustained, slowly forget (Risk Mitigation)
+        # Apathy Threshold: 0.5 (Frustration/Mistakes)
+        forgetting = tf.where(dopamine < 0.5, 0.001, 0.0)
+        
+        self.permanence.assign(tf.clip_by_value(self.permanence * (1.0 - forgetting) + myelin_growth, 0.0, 1.0))
 
         # 3. HOMEOSTATIC SYNAPTIC SCALING (Normalization)
         # Prevents any one neuron from becoming 'infinite' and seizing the network.
@@ -191,8 +207,13 @@ class LIFCortexLayer:
 
     def prune(self, threshold=0.005):
         # Sever weak synaptic connections entirely
+        # v4.1: Protect "Gold Medal" synapses from pruning (Shield threshold: 0.2 permanence)
         weak_synapses = tf.cast(tf.abs(self.weights) < threshold, tf.float32)
-        survival_mask = 1.0 - weak_synapses
+        permanently_locked = tf.cast(self.permanence > 0.2, tf.float32)
+        
+        # Survival rule: (Strong enough) OR (Permanently Locked)
+        survival_mask = 1.0 - (weak_synapses * (1.0 - permanently_locked))
+        
         new_mask = self.synaptic_mask * survival_mask
         pruned_count = tf.reduce_sum(self.synaptic_mask - new_mask)
         self.synaptic_mask.assign(new_mask)
@@ -211,7 +232,7 @@ class LIFCortexLayer:
         return grown_count
 
     def get_variables(self):
-        return [self.weights, self.biases]
+        return [self.weights, self.biases, self.permanence]
 
 class ConvLIFCortexLayer:
     """ Biological approximation of Retinotopy via restricted spatial receptive fields. """
@@ -233,6 +254,7 @@ class ConvLIFCortexLayer:
         
         self.synaptic_mask = tf.Variable(initial_value=tf.ones_like(self.weights), trainable=False, name="conv_mask")
         self.hebbian_trace = tf.Variable(initial_value=tf.zeros_like(self.weights), trainable=False, name="hebbian_trace")
+        self.permanence = tf.Variable(initial_value=tf.zeros_like(self.weights), trainable=False, name="conv_permanence")
         
         out_h = input_shape[0] // stride
         out_w = input_shape[1] // stride
@@ -327,14 +349,30 @@ class ConvLIFCortexLayer:
             demand_block = tf.tile(demand_block, [self.kernel_size, self.kernel_size, 1, 1])
             self.hebbian_trace.assign_add(demand_block)
 
-    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0):
+    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0, dopamine=1.0):
+        # Convolutional STDP update modulated by dopamine
+        reward_modulated_lr = learning_rate * dopamine
         actual_decay = decay + (metabolic_tax * 0.005)
-        delta = (learning_rate * self.hebbian_trace) - (actual_decay * self.weights)
+        delta = (reward_modulated_lr * self.hebbian_trace) - (actual_decay * self.weights)
         self.weights.assign_add(delta * self.synaptic_mask)
+        
+        # --- SYNAPTIC PERMANENCE (Conv LTM) ---
+        myelin_growth = tf.where(dopamine > 1.5, self.hebbian_trace * 0.05, tf.zeros_like(self.hebbian_trace))
+        forgetting = tf.where(dopamine < 0.5, 0.001, 0.0)
+        self.permanence.assign(tf.clip_by_value(self.permanence * (1.0 - forgetting) + myelin_growth, 0.0, 1.0))
+        
+        # Homeostatic Scaling for Conv filters (Target budget: 15.0 units per filter)
+        abs_weights = tf.abs(self.weights)
+        total_inward = tf.reduce_sum(abs_weights, axis=[0, 1, 2], keepdims=True)
+        budget = 15.0
+        scaling = tf.where(total_inward > budget, budget / (total_inward + 1e-6), tf.ones_like(total_inward))
+        self.weights.assign(self.weights * scaling)
 
     def prune(self, threshold=0.005):
         weak_synapses = tf.cast(tf.abs(self.weights) < threshold, tf.float32)
-        survival_mask = 1.0 - weak_synapses
+        permanently_locked = tf.cast(self.permanence > 0.2, tf.float32)
+        survival_mask = 1.0 - (weak_synapses * (1.0 - permanently_locked))
+        
         new_mask = self.synaptic_mask * survival_mask
         pruned_count = tf.reduce_sum(self.synaptic_mask - new_mask)
         self.synaptic_mask.assign(new_mask)
@@ -351,7 +389,7 @@ class ConvLIFCortexLayer:
         return grown_count
 
     def get_variables(self):
-        return [self.weights, self.biases]
+        return [self.weights, self.biases, self.permanence]
 
 class RecurrentLIFCortexLayer(LIFCortexLayer):
     """ Biological Top-Down Attention mechanism """
@@ -363,6 +401,7 @@ class RecurrentLIFCortexLayer(LIFCortexLayer):
         self.recurrent_synaptic_mask = tf.Variable(initial_value=tf.ones_like(self.recurrent_weights), trainable=False, name="recurrent_mask")
         
         self.recurrent_hebbian_trace = tf.Variable(initial_value=tf.zeros_like(self.recurrent_weights), trainable=False, name="recurrent_trace")
+        self.recurrent_permanence = tf.Variable(initial_value=tf.zeros_like(self.recurrent_weights), trainable=False, name="recurrent_permanence")
         
         # Recurrent state persistence
         self.prev_spikes = tf.Variable(initial_value=tf.zeros((1, num_neurons)), trainable=False, name="prev_spikes_state")
@@ -474,15 +513,26 @@ class RecurrentLIFCortexLayer(LIFCortexLayer):
             demand_rw = tf.expand_dims(self.last_output_rate, 1) * tf.expand_dims(self.last_output_rate, 0)
             self.recurrent_hebbian_trace.assign_add(demand_rw)
 
-    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0):
-        super().apply_stdp(learning_rate, decay, metabolic_tax)
-        delta_rw = (learning_rate * self.recurrent_hebbian_trace) - (decay * self.recurrent_weights)
+    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0, dopamine=1.0):
+        # 1. Update Feedforward weights via super (supports dopamine)
+        super().apply_stdp(learning_rate, decay, metabolic_tax, dopamine=dopamine)
+        
+        # 2. Update Recurrent weights (modulated by dopamine)
+        reward_modulated_lr = learning_rate * dopamine
+        delta_rw = (reward_modulated_lr * self.recurrent_hebbian_trace) - (decay * self.recurrent_weights)
         self.recurrent_weights.assign_add(delta_rw * self.recurrent_synaptic_mask)
+
+        # --- RECURRENT PERMANENCE (Sequence LTM) ---
+        myelin_growth_rw = tf.where(dopamine > 1.5, self.recurrent_hebbian_trace * 0.05, tf.zeros_like(self.recurrent_hebbian_trace))
+        forgetting_rw = tf.where(dopamine < 0.5, 0.001, 0.0)
+        self.recurrent_permanence.assign(tf.clip_by_value(self.recurrent_permanence * (1.0 - forgetting_rw) + myelin_growth_rw, 0.0, 1.0))
 
     def prune(self, threshold=0.005):
         pruned_fw = super().prune(threshold)
         weak_rw = tf.cast(tf.abs(self.recurrent_weights) < threshold, tf.float32)
-        surv_mask = 1.0 - weak_rw
+        permanently_locked_rw = tf.cast(self.recurrent_permanence > 0.2, tf.float32)
+        
+        surv_mask = 1.0 - (weak_rw * (1.0 - permanently_locked_rw))
         new_mask = self.recurrent_synaptic_mask * surv_mask
         pruned_rw = tf.reduce_sum(self.recurrent_synaptic_mask - new_mask)
         self.recurrent_synaptic_mask.assign(new_mask)
@@ -500,7 +550,7 @@ class RecurrentLIFCortexLayer(LIFCortexLayer):
         return grown_fw + tf.reduce_sum(new_rw_growth)
 
     def get_variables(self):
-        return [self.weights, self.recurrent_weights, self.biases]
+        return [self.weights, self.recurrent_weights, self.biases, self.permanence, self.recurrent_permanence]
 
 class DeconvLIFCortexLayer:
     """ Biological Reverse-Retinotopy via Spatial Extrapolation. """
@@ -522,6 +572,7 @@ class DeconvLIFCortexLayer:
         self.biases = tf.Variable(initial_value=tf.zeros(filters), trainable=True, name="deconv_biases")
         
         self.synaptic_mask = tf.Variable(initial_value=tf.ones_like(self.weights), trainable=False, name="conv_mask")
+        self.permanence = tf.Variable(initial_value=tf.zeros_like(self.weights), trainable=False, name="deconv_permanence")
         
         out_h = input_shape[0] * stride
         out_w = input_shape[1] * stride
@@ -601,11 +652,24 @@ class DeconvLIFCortexLayer:
         
         return tf.reshape(spikes_time_batch, [batch_size, time_steps, out_h * out_w * self.filters])
 
-    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0):
-        pass # Deconv geometric mapping updates skipped natively for stability
+    def update_hebbian_trace(self):
+        """ Deconv layers use geometric mapping; traces are currently bypassed for motor stability. """
+        pass
+
+    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0, dopamine=1.0):
+        """ Deconv STDP is bypassed to maintain geometric visual consistency. """
+        pass
+
+    def prune(self, threshold=0.005):
+        """ Deconv pruning bypassed for motor-geometric stability. """
+        return 0
+
+    def grow(self, threshold=0.1):
+        """ Deconv spawning bypassed for motor-geometric stability. """
+        return 0
 
     def get_variables(self):
-        return [self.weights, self.biases]
+        return [self.weights, self.biases, self.permanence]
 
 class SubCortexNetwork:
     """ Regional processing center routing over time. """
@@ -633,10 +697,10 @@ class SubCortexNetwork:
             if hasattr(layer, 'update_hebbian_trace'):
                 layer.update_hebbian_trace()
 
-    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0):
+    def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0, dopamine=1.0):
         for layer in self.layers:
             if hasattr(layer, 'apply_stdp'):
-                layer.apply_stdp(learning_rate, decay, metabolic_tax)
+                layer.apply_stdp(learning_rate, decay, metabolic_tax, dopamine=dopamine)
 
     def prune(self, threshold=0.005):
         return sum([layer.prune(threshold) for layer in self.layers if hasattr(layer, 'prune')])

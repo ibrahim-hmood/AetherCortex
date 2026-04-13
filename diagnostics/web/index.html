@@ -214,7 +214,10 @@
             </div>
 
             <div class="glass-panel p-6 overflow-hidden h-1/2 flex flex-col">
-                <h3 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Regional Telemetry</h3>
+                <h3 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Regional Telemetry (Myelination Status)</h3>
+                <div id="permanence-container" class="grid grid-cols-2 gap-2 mb-4">
+                    <!-- Dynamic Permanence Slots -->
+                </div>
                 <div id="log-container" class="flex-grow font-mono text-[10px] text-gray-600 space-y-2 overflow-y-auto custom-scrollbar">
                     <!-- Logs injection -->
                 </div>
@@ -281,7 +284,8 @@
             Object.keys(data.activity).forEach(region => {
                 if (region === 'global') return;
                 const intensity = data.activity[region] || 0;
-                updateRegion(region, intensity, mode);
+                const permanence = (data.permanence && data.permanence[region]) || 0;
+                updateRegion(region, intensity, permanence, mode);
             });
 
             // Update Regional Health
@@ -313,7 +317,7 @@
             addLog(`G-Density: ${(globalDensity * 100).toFixed(2)}% | Broca: ${brocaInt.toFixed(4)} | Cere: ${motorInt.toFixed(4)} | Mode: ${data.mode}`);
         });
 
-        function updateRegion(name, intensity, mode) {
+        function updateRegion(name, intensity, permanence, mode) {
             const blob = document.getElementById('blob-' + name);
             const label = document.getElementById('label-' + name);
             if (!blob) return;
@@ -323,29 +327,56 @@
             const blur = Math.min(60, 10 + intensity * 200);
             const brightness = 1.0 + (intensity * 8.0); // Boost brightness for excited regions
 
-            blob.style.opacity = intensity > 0.001 ? opacity : 0;
+            blob.style.opacity = intensity > 0.001 ? opacity : 0.05; // Faint ghost pulse for permanency
             
-            // v3.2: Biological Mode Color Shifting
+            // v4.1: Gold Medal 'Aura' for Permanent Synapses
             let filter = `blur(${blur}px) brightness(${brightness})`;
+            if (permanence > 0.1) {
+                const goldAura = Math.min(1.0, (permanence - 0.1) * 2);
+                filter += ` drop-shadow(0 0 ${20 * goldAura}px rgba(255, 215, 0, ${0.4 * goldAura}))`;
+            }
+
             if (mode === 'inference') {
-                // Shift to Amber/Gold (White-ish)
                 filter += ` saturate(0.5) sepia(0.5) hue-rotate(-10deg)`;
             } else if (mode === 'generation') {
-                // Shift toward Magenta/Fuchsia
                 filter += ` hue-rotate(260deg) saturate(1.5)`;
             }
             
             blob.style.filter = filter;
             
+            // Update Permanence Tag in Sidebar
+            updatePermanenceTag(name, permanence);
+
             if (intensity > 0.01) {
                 label.classList.add('active');
                 if (mode === 'inference') label.style.color = '#fbbf24';
                 else if (mode === 'generation') label.style.color = '#e879f9';
+                else if (permanence > 0.2) label.style.color = '#ffd700'; // Gold color for Mature regions
                 else label.style.color = '';
             } else {
                 label.classList.remove('active');
                 label.style.color = '';
             }
+        }
+
+        function updatePermanenceTag(name, value) {
+            const container = document.getElementById('permanence-container');
+            let tag = document.getElementById('perm-tag-' + name);
+            if (!tag) {
+                tag = document.createElement('div');
+                tag.id = 'perm-tag-' + name;
+                tag.className = "flex justify-between items-center px-3 py-1 bg-white/5 rounded-lg border border-white/5";
+                container.appendChild(tag);
+            }
+            
+            const pct = (value * 100).toFixed(1);
+            const color = value > 0.2 ? 'text-amber-400' : 'text-gray-500';
+            const adultStatus = value > 0.2 ? '🔒' : '🌱';
+            
+            tag.innerHTML = `
+                <span class="text-[7px] text-gray-500 uppercase font-black">${name}</span>
+                <span class="text-[9px] ${color} font-mono font-bold">${pct}% ${adultStatus}</span>
+            `;
         }
 
         function addLog(msg) {

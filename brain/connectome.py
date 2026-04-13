@@ -54,6 +54,9 @@ class BrainConnectome:
         self.frontal_language = FrontalLanguageCortex(semantic_input_dim=512, motor_output_dim=auditory_input_dim, threshold=0.05, persistence=0.1, facilitation=True)
         self.visual_motor_strip = VisualMotorCortex(executive_dim=512, decode_shape=(64, 64, 3), threshold=threshold)
 
+        # --- LIBMIC REWARD SYSTEM (v4.0 Dopamine Upgrade) ---
+        self.dopamine_level = tf.Variable(1.0, trainable=False, name="global_dopamine")
+        
         # --- REGIONAL METABOLIC MAP (v3.0 Homeostatic Autonomy) ---
         self.regional_threshold_map = {
             "visual": self.visual_cortex.layers[0].threshold_variable,
@@ -139,7 +142,7 @@ class BrainConnectome:
         # Generate visual imagination
         imagined_visual_spikes = self.visual_motor_strip.forward(executive_decision)
         
-        # --- REGIONAL ACTIVITY MONITORING (NEW v1.0) ---
+        # --- REGIONAL ACTIVITY MONITORING ---
         regional_activity = {
             "visual": tf.reduce_mean(visual_thought),
             "temporal": tf.reduce_mean(audio_thought),
@@ -149,12 +152,11 @@ class BrainConnectome:
             "vwfa": tf.reduce_mean(internal_voice),
             "hippocampus": tf.reduce_mean(memory_boosted_integrated),
             "motor_strip": tf.reduce_mean(imagined_visual_spikes),
-            "cerebellum": tf.reduce_mean(response_spikes_broca), # Placeholder for motor precision
+            "cerebellum": tf.reduce_mean(response_spikes_broca),
             "global": internal_density
         }
         
         # --- UPDATE REENTRY PERSISTENCE ---
-        # Take only the final time-step spike state to feed into the NEXT thought cycle
         self.prev_pfc_spikes.assign(executive_decision[:1, -1, :])
         self.prev_broca_spikes.assign(response_spikes_broca[:1, -1, :])
         
@@ -189,41 +191,86 @@ class BrainConnectome:
                 # Biological Safety Clipping (v3.0 Floor: 0.01)
                 threshold_var.assign(tf.clip_by_value(threshold_var, 0.01, 3.0))
 
-    def apply_plasticity_and_pruning(self, prune_threshold=0.005, grow_threshold=0.1):
-        pruned = 0.0
-        grown = 0.0
-        
-        regions = [
-            self.visual_cortex, self.temporal_lobe, self.integration_layer, 
-            self.vwfa_bridge, self.prefrontal_cortex, self.visual_motor_strip,
-            self.hippocampus, self.basal_ganglia, self.amygdala, self.cerebellum, self.frontal_language
-        ]
-        
-        for region in regions:
-            if hasattr(region, 'prune'): pruned += region.prune(prune_threshold)
-            if hasattr(region, 'grow'): grown += region.grow(grow_threshold)
-            
-        return pruned, grown
-
     def update_hebbian_traces(self):
-        regions = [
-            self.visual_cortex, self.temporal_lobe, self.integration_layer, 
-            self.vwfa_bridge, self.prefrontal_cortex, self.visual_motor_strip,
-            self.hippocampus, self.basal_ganglia, self.amygdala, self.cerebellum, self.frontal_language
-        ]
-        for region in regions:
-            if hasattr(region, 'update_hebbian_trace'):
-                region.update_hebbian_trace()
+        """Accumulates synaptic demand based on temporal correlations."""
+        for layer in self.all_layers():
+            layer.update_hebbian_trace()
 
     def apply_stdp(self, learning_rate=1e-4, decay=1e-5, metabolic_tax=0.0):
-        regions = [
-            self.visual_cortex, self.temporal_lobe, self.integration_layer, 
-            self.vwfa_bridge, self.prefrontal_cortex, self.visual_motor_strip,
-            self.hippocampus, self.basal_ganglia, self.amygdala, self.cerebellum, self.frontal_language
-        ]
-        for region in regions:
-            if hasattr(region, 'apply_stdp'):
-                region.apply_stdp(learning_rate, decay, metabolic_tax)
+        """ 
+        Global synaptic update pass modulated by the current Dopamine state. 
+        """
+        d_val = self.dopamine_level.read_value()
+        for layer in self.all_layers():
+            layer.apply_stdp(
+                learning_rate=learning_rate, 
+                decay=decay, 
+                metabolic_tax=metabolic_tax,
+                dopamine=d_val
+            )
+
+    def prune(self, threshold=0.005):
+        """Severs unused synaptic connections across the entire brain."""
+        total_pruned = 0
+        for layer in self.all_layers():
+            total_pruned += layer.prune(threshold=threshold)
+        return total_pruned
+
+    def grow(self, threshold=0.1):
+        """Spawns new synaptic connections in high-demand pathways."""
+        total_grown = 0
+        for layer in self.all_layers():
+            total_grown += layer.grow(threshold=threshold)
+        return total_grown
+
+    def get_permanence_map(self):
+        """Calculates the average Synaptic Permanence (LTM) for every brain region."""
+        # Mapping regions to their internal layer aggregations
+        regions = {
+            "visual": self.visual_cortex.layers,
+            "temporal": self.temporal_lobe.layers,
+            "parietal": [self.integration_layer],
+            "executive": self.prefrontal_cortex.layers,
+            "broca": self.frontal_language.layers,
+            "hippocampus": [self.hippocampus],
+            "motor_strip": self.visual_motor_strip.layers,
+            "cerebellum": [self.cerebellum]
+        }
+        
+        perm_map = {}
+        for region, layer_list in regions.items():
+            perms = []
+            for layer in layer_list:
+                if hasattr(layer, 'permanence'):
+                    perms.append(tf.reduce_mean(layer.permanence))
+                if hasattr(layer, 'recurrent_permanence'):
+                    perms.append(tf.reduce_mean(layer.recurrent_permanence))
+            
+            if perms:
+                perm_map[region] = tf.reduce_mean(perms)
+            else:
+                perm_map[region] = 0.0
+                
+        # Global permanence average
+        all_perms = list(perm_map.values())
+        perm_map["global"] = sum(all_perms) / len(all_perms) if all_perms else 0.0
+        return perm_map
+
+    def all_layers(self):
+        """Iterator for every synaptic layer in the brain."""
+        layers = []
+        layers.extend(self.visual_cortex.layers)
+        layers.extend(self.temporal_lobe.layers)
+        layers.append(self.vwfa_bridge)
+        layers.append(self.integration_layer)
+        layers.append(self.hippocampus)
+        layers.extend(self.prefrontal_cortex.layers)
+        layers.append(self.amygdala)
+        layers.append(self.basal_ganglia)
+        layers.append(self.cerebellum)
+        layers.extend(self.frontal_language.layers)
+        layers.extend(self.visual_motor_strip.layers)
+        return layers
 
     def reset_state(self):
         """Clears all neural memory across the entire connectome."""

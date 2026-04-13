@@ -31,6 +31,9 @@ EPOCHS = 100
 DATASET_DIR = "dataset"
 MODEL_DIR = "biological_model"
 
+# Curriculum Focus (v4.2)
+focus_word = ""
+
 def ensure_dummy_dataset():
     """Generates a dummy multimodal dataset if the folder is empty so we can test right away."""
     if not os.path.exists(DATASET_DIR):
@@ -132,10 +135,12 @@ def train():
     parser = argparse.ArgumentParser(description="Biomimetic SNN Trainer")
     parser.add_argument("--biotrain", action="store_true", help="Enable strictly biological training (Curriculum, STDP, Sleep Replay, Active Inference). Disables Backprop.")
     parser.add_argument("--epochs", type=int, default=0, help="Number of epochs to train for. Bypasses interactive input if > 0.")
+    parser.add_argument("--focus", type=str, default="", help="Focus training on a specific word/concept")
     args, _ = parser.parse_known_args()
     
     bio_train_mode = args.biotrain
-    print(f"--- Biological Connectome Training Sequence | BIOTRAIN: {bio_train_mode} ---")
+    focus_word = args.focus
+    print(f"--- Biological Connectome Training Sequence | BIOTRAIN: {bio_train_mode} | FOCUS: {focus_word or 'None'} ---")
     
     ensure_dummy_dataset()
     
@@ -148,6 +153,7 @@ def train():
     brain = BrainConnectome.load_model(MODEL_DIR)
     
     trainer = BrainTrainer(brain)
+    trainer.focus_word = focus_word
     curriculum = SensoryCurriculum(DATASET_DIR)
     
     basenames = get_dataset_basenames()
@@ -215,10 +221,11 @@ def train():
                             aud_t = tf.zeros((1, TIME_STEPS, 256), dtype=tf.float32)
                             
                             brain.reset_state()
-                            loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True)
+                            loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True, context_str=p_str)
                             
                             # --- STREAM TO DASHBOARD ---
-                            streamer.stream_state(activity_map, context_text=p_str, mode="training")
+                            p_map = brain.get_permanence_map()
+                            streamer.stream_state(activity_map, permanence_map=p_map, context_text=p_str, mode="training")
                             
                             epoch_loss += float(loss)
                             hippocampus.append((vis_t, aud_t, targ))
@@ -239,10 +246,11 @@ def train():
                 
                 if vis_t is not None:
                     brain.reset_state()
-                    loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True)
+                    loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True, context_str=base)
                     
                     # --- STREAM TO DASHBOARD ---
-                    streamer.stream_state(activity_map, context_text=f"Labeling: {base}", mode="training")
+                    p_map = brain.get_permanence_map()
+                    streamer.stream_state(activity_map, permanence_map=p_map, context_text=f"Labeling: {base}", mode="training")
                     
                     epoch_loss += float(loss)
                     hippocampus.append((vis_t, aud_t, targ))
@@ -251,12 +259,12 @@ def train():
                     # Update Thalamic Shell state for gating
                     brain.last_spike_density = float(trainer.current_activity.numpy())
                     
-                    # --- REACTIVE OFFSHORE SLEEP (Panic Pruning) ---
+                    # --- HOMEOSTATIC PANIC (v4.0 Reactive Sleep) ---
                     if brain.last_spike_density > 0.25:
                         cranky_counter += 1
                         if cranky_counter > 3:
-                            print("\n>>> [Homeostasis] Brain is CRANKY (Over-excited). Triggering Reactive Panic Sleep...")
-                            async_plasticity(brain, 0.005, 0.05) # Aggressive pruning
+                            print("\n>>> [Homeostasis] Brain is OVER-EXCITED. Triggering Emergency Consolidation...")
+                            trainer.sleep_consolidation()
                             cranky_counter = 0
                             brain.reset_state()
                     else:
@@ -272,7 +280,8 @@ def train():
                 loss, _, _, activity_map = trainer.train_predictive_step(visual_train_t, auditory_train_t, target_text_rates, bio_train_mode=False)
                 
                 # --- STREAM TO DASHBOARD ---
-                streamer.stream_state(activity_map, context_text="Standard BackProp Step", mode="training")
+                p_map = brain.get_permanence_map()
+                streamer.stream_state(activity_map, permanence_map=p_map, context_text="Standard BackProp Step", mode="training")
                 
                 epoch_loss += loss.numpy()
             
@@ -286,17 +295,18 @@ def train():
             print("> [Infancy] archiving first stable neural traces...")
             brain.save_model(MODEL_DIR)
         
-        if (epoch % 5 == 0):
-            if bio_train_mode and len(hippocampus) > 0:
-                print("\n> Initiating Offline Sleep (Rapid Hippocampal STDP Replay) - Synchronous embedding...")
+        # --- DEEP SLEEP (v4.0 Synaptic Consolidation) ---
+        # At the end of every epoch, she pulls the hippocampal traces into physical synapses.
+        if bio_train_mode:
+            if len(hippocampus) > 0:
+                print("\n> Initiating Rapid Hippocampal Replay...")
+                # Replay recent high-saliency events through the brain one last time
                 for h_vis, h_aud, h_targ in list(hippocampus):
-                    trainer.train_predictive_step(h_vis, h_aud, h_targ, bio_train_mode=True)
+                    trainer.train_predictive_step(h_vis, h_aud, h_targ, bio_train_mode=True, context_str="Hippocampal Replay")
                 hippocampus.clear()
             
-            print("\n> Initiating Autonomic Biological Deep Sleep (Pruning on Background Thread)...")
-            sleep_thread = threading.Thread(target=async_plasticity, args=(brain, 0.005, 0.1))
-            sleep_thread.daemon = True
-            sleep_thread.start()
+            # Physical Structural Consolidation (Pruning weak, Growing strong)
+            trainer.sleep_consolidation()
 
             
         if epoch % 10 == 0:

@@ -67,7 +67,8 @@ def main():
             
             # --- STREAM TO DASHBOARD (One update per millisecond) ---
             step_context = f"Reading: {prompt} [{t+1}/{TIME_STEPS}ms]"
-            streamer.stream_state(activity_map, context_text=step_context, mode="inference")
+            p_map = brain.get_permanence_map()
+            streamer.stream_state(activity_map, permanence_map=p_map, context_text=step_context, mode="inference")
             
             # Cognitive Pacing: Ensures the ripple is visible on the web dashboard
             time.sleep(0.01)
@@ -115,7 +116,8 @@ def main():
                 
                 # --- STREAM TO DASHBOARD (Inner Voice Activity) ---
                 current_context = " ".join(full_sentence) if full_sentence else "Starting monologue..."
-                streamer.stream_state(activity_map, context_text=f"{current_context} [{sub_t+1}/30ms]", mode="generation")
+                p_map = brain.get_permanence_map()
+                streamer.stream_state(activity_map, permanence_map=p_map, context_text=f"{current_context} [{sub_t+1}/30ms]", mode="generation")
                 time.sleep(0.005)
 
             brocas_out = tf.concat(all_broca, axis=1)
@@ -149,7 +151,8 @@ def main():
                 all_vis.append(visual_step)
                 
                 # --- STREAM TO DASHBOARD (Flicker Effect) ---
-                streamer.stream_state(activity_map, context_text=f"Dreaming frame {t+1} [{sub_t+1}/30ms]", mode="generation")
+                p_map = brain.get_permanence_map()
+                streamer.stream_state(activity_map, permanence_map=p_map, context_text=f"Dreaming frame {t+1} [{sub_t+1}/30ms]", mode="generation")
                 time.sleep(0.005) # Faster delay for dreaming
             
             # Reconstruct the full 30-step hallucination
@@ -179,14 +182,16 @@ def main():
             
             # --- STREAM TO DASHBOARD (Deep Wave) ---
             if t % 5 == 0: # Stream every 5ms for the long 300ms dream to avoid network lag
-                streamer.stream_state(activity_map, context_text=f"Deep Exposure Dream [{t+1}/300ms]", mode="generation")
+                p_map = brain.get_permanence_map()
+                streamer.stream_state(activity_map, permanence_map=p_map, context_text=f"Deep Exposure Dream [{t+1}/300ms]", mode="generation")
             time.sleep(0.002)
         
         visual_out = tf.concat(all_vis, axis=1)
         
-        # --- STREAM TO DASHBOARD FINAL ---
-        streamer.stream_state(activity_map, context_text="Latent Directed Dreaming Finalized", mode="generation")
         decoder.decode_to_image(visual_out, filepath="deep_dream.png")
+        # Final Refresh AFTER file is written
+        p_map = brain.get_permanence_map()
+        streamer.stream_state(activity_map, permanence_map=p_map, context_text="Latent Directed Dreaming Finalized", mode="generation")
         print("\n>> Deep Latent Dream image mapping materialized into deep_dream.png")
 
     elif mode == "4":
@@ -228,7 +233,8 @@ def main():
                 all_vis.append(visual_step)
                 
                 # --- STREAM TO DASHBOARD (Active Saccade ripple) ---
-                streamer.stream_state(activity_map, context_text=f"Saccade {i+1} [{sub_t+1}/30ms]", mode="generation")
+                p_map = brain.get_permanence_map()
+                streamer.stream_state(activity_map, permanence_map=p_map, context_text=f"Saccade {i+1} [{sub_t+1}/30ms]", mode="generation")
                 time.sleep(0.005)
             
             brocas_out = tf.concat(all_broca, axis=1)
@@ -249,6 +255,9 @@ def main():
             
         if cv2 is not None:
             cv2.imwrite("saccadic_drawing.png", cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))
+            # Final Refresh AFTER file is written
+            p_map = brain.get_permanence_map()
+            streamer.stream_state(activity_map, permanence_map=p_map, context_text="Active Inference Drawing Finalized", mode="generation")
             print("\n>> Active Inference Drawing preserved natively in saccadic_drawing.png")
         else:
             print("\n>> Skip saving saccadic_drawing.png (cv2 missing)")

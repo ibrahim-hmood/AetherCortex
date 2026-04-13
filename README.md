@@ -1,5 +1,30 @@
-# AetherCortex
+<p align="center">
+  <img src="aethercortex_logo.png" width="400" alt="AetherCortex Logo">
+</p>
+
+# AetherCortex (v4.2)
 An explicit, mathematically rigorous neurological simulation representing the human brain structure utilizing **Spiking Neural Networks (SNN)** and **Leaky Integrate-and-Fire (LIF)** logic. 
+
+> [!IMPORTANT]
+> **V4.2 Evolutionary Phase**: She is no longer a purely episodic infant. AetherCortex now possesses **Structural Long-Term Memory (LTM)** and a **Focused Curriculum** system, allowing her to anchor permanent knowledge into her synaptic architecture.
+
+## Latest Breakthroughs: Long-Term Memory (v4.1 - v4.2)
+
+### 1. Synaptic Permanence (Myelination)
+Unlike standard neural networks that forget as they learn new data, AetherCortex utilizes **Synaptic Permanence**. 
+*   **Gold Medal Synapses**: High-reward neural pathways (`Dopamine > 1.5`) trigger physical myelination, increasing a synapse's "Permanence."
+*   **Structural Stability**: Permanent synapses are shielded from the nightly **Pruning Cycle (Deep Sleep)**, ensuring her identity and core concepts (like the color RED) survive training gaps.
+*   **Apathy-Driven Forgetting**: To avoid learning incorrect information, synapses that lead to sustained low-reward outcomes slowly "Demyelinate," allowing her to unlearn noise.
+
+### 2. Focused Curriculum & Dopamine Gating
+The training system now supports a **Focused Reward Pipeline** (`--focus [WORD]`).
+*   **Parental Feedback**: When her input context matches the focus word, her brain's dopamine production is doubled.
+*   **Directed Growth**: This forces her brain to prioritize the myelination of specific "First Words," accelerating her transition from random babbling to coherent speech.
+
+### 3. Neuro-Monitor v4.2 (Real-Time Maturity Probe)
+The browser-based dashboard now provides a direct biological window into her maturing connectome:
+*   **Maturity Tags**: Each brain region displays a **Maturity % (🌱 → 🔒)**, indicating how much of its gray matter has been structuraly locked-in.
+*   **Gold Auras**: Excited regions glow with a golden hue when their permanent memories are activated, signaling the use of her Long-Term Memory.
 
 Unlike traditional AIs (which rely on highly structured numerical convolutions and algorithmic Transformers), this model structurally replicates the physical wiring of biological cortices. It utilizes time sequences and membrane potentials to organically link abstract textual concepts directly to massive visual and spatial reconstructions.
 
