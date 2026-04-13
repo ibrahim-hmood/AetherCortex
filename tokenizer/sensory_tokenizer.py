@@ -75,8 +75,9 @@ class SensoryTokenizer:
         canvas_height = 64
         strip = np.zeros((canvas_height, canvas_width, 1), dtype=np.uint8)
         
-        # Draw the text centrally on the strip
-        cv2.putText(strip, text_string, (64, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 255, 2)
+        # Draw the text centrally on the strip with a more legible biological scale
+        # 0.8 scale fits perfectly in the 64px vertical space
+        cv2.putText(strip, text_string, (64, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.8, 255, 2)
         
         processed_frames = []
         # The text scrolls from right to left across the 64x64 window
@@ -121,7 +122,7 @@ class SensoryTokenizer:
 
         return tf.expand_dims(tf.convert_to_tensor(spikes), 0)  # [1, time_steps, auditory_dim]
 
-    def thalamic_routing(self, sensory_type, raw_data, time_steps=15):
+    def thalamic_routing(self, sensory_type, raw_data, time_steps=30):
         if sensory_type == "vision":
             return self.process_image(raw_data, time_steps)
         elif sensory_type == "video":

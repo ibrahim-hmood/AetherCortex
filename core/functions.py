@@ -12,9 +12,8 @@ def surrogate_spike(v_mem, threshold):
 
     def grad(dy):
         # Surrogate gradient (fast sigmoid derivative):
-        # f(x) = x / (1 + |x|)
-        # f'(x) = 1 / (1 + |x|)^2
-        gamma = 10.0
+        # v0.1.7: Softened gamma to 2.0 for smoother homeostatic damping
+        gamma = 2.0
         x = v_mem - threshold
         grad_v_mem = dy * (1.0 / tf.square(1.0 + gamma * tf.abs(x)))
         return grad_v_mem, None  # No gradient update for the threshold itself

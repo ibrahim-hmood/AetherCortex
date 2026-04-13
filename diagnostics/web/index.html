@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neuro-Monitor | biological_connectome_v2.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;700&family=JetBrains+Mono&display=swap');
+        
+        body {
+            background-color: #020205;
+            color: #d1d1d1;
+            font-family: 'Outfit', sans-serif;
+            overflow: hidden;
+            background-image: radial-gradient(circle at 50% 50%, #0a0a15 0%, #020205 100%);
+        }
+
+        .glass-panel {
+            background: rgba(10, 10, 15, 0.8);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        /* BRAIN SVG ENHANCEMENTS */
+        #brain-mesh {
+            filter: drop-shadow(0 0 30px rgba(0, 255, 255, 0.05));
+        }
+
+        .brain-shell {
+            fill: rgba(20, 20, 30, 0.4);
+            stroke: rgba(255, 255, 255, 0.1);
+            stroke-width: 0.5;
+        }
+
+        .cortex-blob {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            mix-blend-mode: screen;
+            pointer-events: none;
+            filter: blur(20px);
+        }
+
+        .signal-path {
+            fill: none;
+            stroke-width: 2;
+            stroke-dasharray: 4, 12;
+            opacity: 0.1;
+            transition: all 0.3s ease;
+            filter: drop-shadow(0 0 5px currentColor);
+        }
+
+        .signal-path.active {
+            opacity: 1;
+            animation: flow 0.8s linear infinite;
+        }
+
+        @keyframes flow {
+            to { stroke-dashoffset: -32; }
+        }
+
+        .region-label {
+            font-size: 10px;
+            font-weight: 800;
+            fill: rgba(255, 255, 255, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: all 0.3s ease;
+            pointer-events: none;
+        }
+
+        .region-label.active {
+            fill: #fff;
+            text-shadow: 0 0 15px currentColor;
+        }
+
+        /* NEURO GLOW COLORS */
+        .neon-visual { color: #ff00ff; }
+        .neon-auditory { color: #00ff00; }
+        .neon-parietal { color: #00eeff; }
+        .neon-executive { color: #ffff00; }
+        .neon-broca { color: #ff6600; }
+        .neon-hippocampus { color: #ffffff; }
+
+        .status-pill {
+            padding: 2px 10px;
+            border-radius: 100px;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+    </style>
+</head>
+<body class="p-8 h-screen flex flex-col">
+    <!-- Header -->
+    <header class="flex justify-between items-center mb-6">
+        <div class="flex items-center gap-4">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+                    SNN NEURO-MONITOR v2.2.0
+                </h1>
+                <p class="text-[9px] text-gray-500 uppercase tracking-[0.3em]">Cortex Surgery & Homeostatic Triage Interface</p>
+            </div>
+        </div>
+        <div id="connection-status" class="status-pill border border-red-500/50 text-red-500 bg-red-500/5">OFFLINE</div>
+    </header>
+
+    <main class="flex-grow flex gap-6 min-h-0">
+        <!-- Visualization Area -->
+        <div class="flex-grow glass-panel relative p-12 flex items-center justify-center overflow-hidden">
+            <div class="absolute top-8 left-10 flex flex-col gap-1">
+                <span class="text-[9px] text-gray-600 font-bold uppercase tracking-widest">Connectome State</span>
+                <span id="cortex-mode" class="text-lg font-bold text-cyan-400 tracking-tighter">SYNAPTIC SLEEP</span>
+            </div>
+
+            <!-- HIGH-FIDELITY BRAIN SVG (LATERAL VISTA) -->
+            <svg id="brain-svg" viewBox="0 -20 800 550" class="w-full h-full max-w-[950px]">
+                <defs>
+                    <radialGradient id="glow-visual" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="#ff00ff" stop-opacity="0.8" />
+                        <stop offset="100%" stop-color="#ff00ff" stop-opacity="0" />
+                    </radialGradient>
+                    <radialGradient id="glow-auditory" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="#00ff00" stop-opacity="0.8" />
+                        <stop offset="100%" stop-color="#00ff00" stop-opacity="0" />
+                    </radialGradient>
+                    <radialGradient id="glow-parietal" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="#0088ff" stop-opacity="0.8" />
+                        <stop offset="100%" stop-color="#0088ff" stop-opacity="0" />
+                    </radialGradient>
+                    <radialGradient id="glow-executive" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="#ffff00" stop-opacity="0.8" />
+                        <stop offset="100%" stop-color="#ffff00" stop-opacity="0" />
+                    </radialGradient>
+                    <radialGradient id="glow-broca" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="#ff4400" stop-opacity="0.8" />
+                        <stop offset="100%" stop-color="#ff4400" stop-opacity="0" />
+                    </radialGradient>
+                    <marker id="arrow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+                        <path d="M0,0 L10,5 L0,10 Z" fill="currentColor" />
+                    </marker>
+                </defs>
+
+                <!-- High-Fidelity Silhouette (mimicking the cooler generated image) -->
+                <path class="brain-shell" d="M150,150 C100,200 80,300 120,400 C150,450 250,480 350,460 C450,480 550,460 650,400 C720,350 750,250 700,150 C650,50 500,20 400,20 C300,20 200,50 150,150 Z" />
+                <path class="brain-shell" style="opacity:0.3; stroke-dasharray:5,5" d="M120,400 Q 400,320 650,400" /> <!-- Cerebellar fold -->
+
+                <!-- Animated Signal Flow (v2.2 Paths) -->
+                <path id="flow-temporal-par" d="M 400 380 Q 420 280 450 180" class="signal-path" style="stroke:#00ff00; marker-end:url(#arrow)" />
+                <path id="flow-vis-par" d="M 680 350 Q 550 250 450 180" class="signal-path" style="stroke:#ff00ff; marker-end:url(#arrow)" />
+                <path id="flow-par-exec" d="M 450 180 Q 300 80 180 180" class="signal-path" style="stroke:#0088ff; marker-end:url(#arrow)" />
+                <path id="flow-exec-broca" d="M 180 180 Q 200 280 240 380" class="signal-path" style="stroke:#ffff00; marker-end:url(#arrow)" />
+                <path id="flow-par-hippo" d="M 450 180 Q 440 230 430 280" class="signal-path" style="stroke:#fff; opacity:0.1; marker-end:url(#arrow)" />
+
+                <!-- Cortical Nodes (SVG Blobs: v2.2 Corrected Coordinates) -->
+                <g id="cortical-nodes">
+                    <!-- Visual (Occipital) -->
+                    <circle id="blob-visual" cx="680" cy="350" r="140" class="cortex-blob" fill="url(#glow-visual)" />
+                    <!-- Temporal (Auditory) -->
+                    <circle id="blob-temporal" cx="400" cy="380" r="130" class="cortex-blob" fill="url(#glow-auditory)" />
+                    <!-- Parietal (Integration Hub) -->
+                    <circle id="blob-parietal" cx="450" cy="180" r="150" class="cortex-blob" fill="url(#glow-parietal)" />
+                    <!-- Executive (PFC) -->
+                    <circle id="blob-executive" cx="180" cy="180" r="140" class="cortex-blob" fill="url(#glow-executive)" />
+                    <!-- Broca's Area -->
+                    <circle id="blob-broca" cx="240" cy="380" r="120" class="cortex-blob" fill="url(#glow-broca)" />
+                    <!-- Hippocampus (Sub-cortical) -->
+                    <circle id="blob-hippocampus" cx="430" cy="280" r="80" class="cortex-blob" fill="white" style="opacity:0.05" />
+                </g>
+
+                <!-- Region Labels -->
+                <text x="680" y="320" text-anchor="middle" class="region-label" id="label-visual">Visual (Occipital)</text>
+                <text x="400" y="440" text-anchor="middle" class="region-label" id="label-temporal">Temporal Lobe (Comprehension)</text>
+                <text x="450" y="150" text-anchor="middle" class="region-label" id="label-parietal">Parietal (Hub)</text>
+                <text x="180" y="150" text-anchor="middle" class="region-label" id="label-executive">Prefrontal (PFC)</text>
+                <text x="240" y="430" text-anchor="middle" class="region-label" id="label-broca">Broca's (Speech)</text>
+            </svg>
+
+            <!-- Bottom Meters -->
+            <div class="absolute bottom-10 left-10 flex gap-4">
+                <div class="px-5 py-3 border border-white/5 rounded-2xl bg-black/40 backdrop-blur-md">
+                    <span class="block text-[8px] text-gray-500 font-bold uppercase mb-1">Total Spike Density</span>
+                    <span id="stat-density" class="text-xl font-bold text-white font-mono">0.00%</span>
+                </div>
+                <div id="stagnation-panel" class="px-5 py-3 border border-green-500/20 rounded-2xl bg-green-500/5 backdrop-blur-md">
+                    <span class="block text-[8px] text-green-500/50 font-bold uppercase mb-1">Synaptic Health</span>
+                    <span id="stat-health" class="text-xl font-bold text-green-400">STABLE</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar (Logs & Buffer) -->
+        <div class="w-96 flex flex-col gap-6">
+            <div class="glass-panel p-6 flex flex-col h-1/2">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Thought Stream Output</h3>
+                    <span class="text-[8px] px-2 py-0.5 bg-cyan-900/50 text-cyan-400 rounded-lg">LIVE_ASCII</span>
+                </div>
+                <div id="buffer-container" class="flex-grow font-mono text-sm text-cyan-100/80 overflow-y-auto italic bg-black/20 rounded-xl p-4 leading-relaxed custom-scrollbar">
+                    Awaiting synaptic transmission...
+                </div>
+            </div>
+
+            <div class="glass-panel p-6 overflow-hidden h-1/2 flex flex-col">
+                <h3 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Regional Telemetry</h3>
+                <div id="log-container" class="flex-grow font-mono text-[10px] text-gray-600 space-y-2 overflow-y-auto custom-scrollbar">
+                    <!-- Logs injection -->
+                </div>
+            </div>
+
+            <!-- v3.1 Visual Motor Output Panel -->
+            <div id="visual-projection-panel" class="glass-panel p-4 flex flex-col gap-4 transition-all duration-1000 opacity-20 hover:opacity-100">
+                <h3 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Visual Motor Projections</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="flex flex-col gap-2">
+                        <span class="text-[8px] text-gray-500 uppercase font-bold text-center">Saccadic Drawing</span>
+                        <img id="img-saccadic" src="/saccadic_drawing.png" class="rounded-lg border border-white/5 bg-black/40 aspect-square object-cover shadow-2xl shadow-cyan-500/10">
+                    </div>
+                    <div class="flex flex-col gap-2">
+                        <span class="text-[8px] text-gray-500 uppercase font-bold text-center">Deep Dream</span>
+                        <img id="img-dream" src="/deep_dream.png" class="rounded-lg border border-white/5 bg-black/40 aspect-square object-cover shadow-2xl shadow-purple-500/10">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="mt-6 flex justify-between items-center text-[9px] text-gray-700 font-bold uppercase tracking-widest px-4">
+        <span>Connectome Surgery Active: Bio-Homeostatic-v2.0</span>
+        <span class="font-mono">Lat: 0.0ms | Flux: 18.2bps | STDP: ON</span>
+    </footer>
+
+    <script>
+        const socket = io();
+        const statusEl = document.getElementById('connection-status');
+        const modeEl = document.getElementById('cortex-mode');
+        const bufferEl = document.getElementById('buffer-container');
+        const logEl = document.getElementById('log-container');
+        const densityEl = document.getElementById('stat-density');
+
+        socket.on('connect', () => {
+            statusEl.innerText = "Synchronized";
+            statusEl.classList.replace('border-red-500/50', 'border-cyan-500/50');
+            statusEl.classList.replace('text-red-500', 'text-cyan-400');
+            statusEl.classList.add('animate-pulse');
+        });
+
+        socket.on('ui_update', (data) => {
+            if (!data || !data.activity) return;
+
+            const mode = data.mode || "idle";
+            modeEl.innerText = mode.toUpperCase();
+            
+            // v3.2: Mode-Based Color Shifting
+            if (mode === 'inference') {
+                modeEl.className = "text-lg font-bold text-amber-400 tracking-tighter drop-shadow-[0_0_10px_rgba(251,191,36,0.3)]";
+            } else if (mode === 'generation') {
+                modeEl.className = "text-lg font-bold text-fuchsia-400 tracking-tighter drop-shadow-[0_0_10px_rgba(232,121,249,0.3)]";
+            } else {
+                modeEl.className = "text-lg font-bold text-cyan-400 tracking-tighter";
+            }
+
+            bufferEl.innerText = data.context || "Waiting for signal...";
+            
+            const globalDensity = data.activity.global || 0;
+            densityEl.innerText = (globalDensity * 100).toFixed(2) + "%";
+
+            // Update Cortical Blobs
+            Object.keys(data.activity).forEach(region => {
+                if (region === 'global') return;
+                const intensity = data.activity[region] || 0;
+                updateRegion(region, intensity, mode);
+            });
+
+            // Update Regional Health
+            const healthEl = document.getElementById('stat-health');
+            if (globalDensity > 0.15) {
+                healthEl.innerText = "SURGERY REQUIRED";
+                healthEl.className = "text-xl font-bold text-red-500 animate-pulse";
+            } else {
+                healthEl.innerText = "STABLE";
+                healthEl.className = "text-xl font-bold text-green-400";
+            }
+
+            // Path Flow logic (Optimized for performance)
+            if (data.activity.visual) document.getElementById('flow-vis-par').classList.toggle('active', data.activity.visual > 0.02);
+            if (data.activity.temporal) document.getElementById('flow-temporal-par').classList.toggle('active', data.activity.temporal > 0.01);
+            if (data.activity.parietal) document.getElementById('flow-par-exec').classList.toggle('active', data.activity.parietal > 0.02);
+            if (data.activity.executive) document.getElementById('flow-exec-broca').classList.toggle('active', data.activity.executive > 0.02);
+
+            // Update Visual Projections if in generation mode
+            if (data.mode === 'generation') {
+                const ts = new Date().getTime();
+                document.getElementById('visual-projection-panel').classList.remove('opacity-20');
+                document.getElementById('img-saccadic').src = `/saccadic_drawing.png?t=${ts}`;
+                document.getElementById('img-dream').src = `/deep_dream.png?t=${ts}`;
+            }
+
+            const brocaInt = data.activity.broca || 0;
+            const motorInt = data.activity.cerebellum || 0;
+            addLog(`G-Density: ${(globalDensity * 100).toFixed(2)}% | Broca: ${brocaInt.toFixed(4)} | Cere: ${motorInt.toFixed(4)} | Mode: ${data.mode}`);
+        });
+
+        function updateRegion(name, intensity, mode) {
+            const blob = document.getElementById('blob-' + name);
+            const label = document.getElementById('label-' + name);
+            if (!blob) return;
+
+            // Intense Scaling logic for Bloom (v3.2: Intensity-mapped Brightness)
+            const opacity = Math.min(1.0, 0.1 + intensity * 6); 
+            const blur = Math.min(60, 10 + intensity * 200);
+            const brightness = 1.0 + (intensity * 8.0); // Boost brightness for excited regions
+
+            blob.style.opacity = intensity > 0.001 ? opacity : 0;
+            
+            // v3.2: Biological Mode Color Shifting
+            let filter = `blur(${blur}px) brightness(${brightness})`;
+            if (mode === 'inference') {
+                // Shift to Amber/Gold (White-ish)
+                filter += ` saturate(0.5) sepia(0.5) hue-rotate(-10deg)`;
+            } else if (mode === 'generation') {
+                // Shift toward Magenta/Fuchsia
+                filter += ` hue-rotate(260deg) saturate(1.5)`;
+            }
+            
+            blob.style.filter = filter;
+            
+            if (intensity > 0.01) {
+                label.classList.add('active');
+                if (mode === 'inference') label.style.color = '#fbbf24';
+                else if (mode === 'generation') label.style.color = '#e879f9';
+                else label.style.color = '';
+            } else {
+                label.classList.remove('active');
+                label.style.color = '';
+            }
+        }
+
+        function addLog(msg) {
+            const entry = document.createElement('div');
+            entry.className = "border-l-2 border-white/5 pl-2 py-1";
+            entry.innerHTML = `<span class="text-gray-500 font-bold">[${new Date().toLocaleTimeString()}]</span> <span class="text-gray-300">${msg}</span>`;
+            logEl.prepend(entry);
+            if (logEl.children.length > 50) logEl.lastChild.remove();
+        }
+    </script>
+</body>
+</html>

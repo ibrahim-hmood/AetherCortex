@@ -2,14 +2,19 @@ import tensorflow as tf
 import os
 import glob
 import numpy as np
+import random
 import threading
 import argparse
 from collections import deque
 
-# Enable Edge-AI Hardware Mixed Precision (Float16)
+# Enable Edge-AI Hardware Mixed Precision (Float16) only if a GPU is available
 try:
-    tf.keras.mixed_precision.set_global_policy('mixed_float16')
-    print("> Enabled mixed_float16 precision for Edge hardware efficiency.")
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        tf.keras.mixed_precision.set_global_policy('mixed_float16')
+        print("> Enabled mixed_float16 precision for Edge hardware efficiency.")
+    else:
+        print("> GPU not detected. Using float32 for maximum CPU numerical stability.")
 except Exception as e:
     print(f"> Failed to set mixed precision: {e}")
 
@@ -17,6 +22,8 @@ from tokenizer.sensory_tokenizer import SensoryTokenizer
 from data_ingestion.multimedia_loader import MultimediaLoader
 from execution.trainer import BrainTrainer
 from brain.connectome import BrainConnectome
+from curriculum import SensoryCurriculum
+from diagnostics.neural_stream import streamer
 
 # Configuration
 TIME_STEPS = 30
@@ -28,31 +35,30 @@ def ensure_dummy_dataset():
     """Generates a dummy multimodal dataset if the folder is empty so we can test right away."""
     if not os.path.exists(DATASET_DIR):
         os.makedirs(DATASET_DIR)
-        
-    png_files = glob.glob(os.path.join(DATASET_DIR, "*.png"))
-    if len(png_files) == 0:
-        print("> No dataset found. Generating dummy physiological dataset...")
-        
-        # We'll create basic concepts
-        concepts = {
-            "apple": {"text": "A red apple", "color": [255, 0, 0]},
-            "ocean": {"text": "The blue ocean", "color": [0, 0, 255]},
-            "grass": {"text": "Green grass", "color": [0, 255, 0]}
-        }
-        
-        for name, data in concepts.items():
-            # 1. Removed textual file dependencies (Title acts as text)
+        png_files = glob.glob(os.path.join(DATASET_DIR, "*.png"))
+        if len(png_files) == 0:
+            print("> No dataset found. Generating dummy physiological dataset...")
             
-            # 2. Write image (A solid colored block representing the concept)
-            # Using basic tf image encoding
-            img_array = np.full((32, 32, 3), data["color"], dtype=np.uint8)
-            img_string = tf.io.encode_png(img_array)
-            tf.io.write_file(os.path.join(DATASET_DIR, f"{name}.png"), img_string)
+            # We'll create basic concepts
+            concepts = {
+                "apple": {"text": "A red apple", "color": [255, 0, 0]},
+                "ocean": {"text": "The blue ocean", "color": [0, 0, 255]},
+                "grass": {"text": "Green grass", "color": [0, 255, 0]}
+            }
             
-            # Note: We skip audio/video, the MultimediaLoader natively handles missing files gracefully.
+            for name, data in concepts.items():
+                # 1. Removed textual file dependencies (Title acts as text)
+                
+                # 2. Write image (A solid colored block representing the concept)
+                # Using basic tf image encoding
+                img_array = np.full((32, 32, 3), data["color"], dtype=np.uint8)
+                img_string = tf.io.encode_png(img_array)
+                tf.io.write_file(os.path.join(DATASET_DIR, f"{name}.png"), img_string)
+                
+                # Note: We skip audio/video, the MultimediaLoader natively handles missing files gracefully.
             
 def get_dataset_basenames():
-    img_files = glob.glob(os.path.join(DATASET_DIR, "*.png"))
+    img_files = glob.glob(os.path.join(DATASET_DIR, "*.png")) + glob.glob(os.path.join(DATASET_DIR, "*.jpg")) + glob.glob(os.path.join(DATASET_DIR, "*.jpeg"))
     vid_files = glob.glob(os.path.join(DATASET_DIR, "*.mp4"))
     txt_files = glob.glob(os.path.join(DATASET_DIR, "*.txt"))
     all_files = img_files + vid_files + txt_files
@@ -76,7 +82,7 @@ def build_sensory_dataset(loader, tokenizer, basenames, time_steps):
                 with open(txt_path, 'r', encoding='utf-8') as f:
                     full_text = f.read()
                 
-                chunk_size = 128
+                chunk_size = 6  # SLOW-READING FIX: 1 character every 5 steps
                 if len(full_text) > 10:
                     for i in range(0, max(1, len(full_text) - chunk_size), chunk_size):
                         p_str = full_text[i : i + chunk_size]
@@ -125,6 +131,7 @@ def build_sensory_dataset(loader, tokenizer, basenames, time_steps):
 def train():
     parser = argparse.ArgumentParser(description="Biomimetic SNN Trainer")
     parser.add_argument("--biotrain", action="store_true", help="Enable strictly biological training (Curriculum, STDP, Sleep Replay, Active Inference). Disables Backprop.")
+    parser.add_argument("--epochs", type=int, default=0, help="Number of epochs to train for. Bypasses interactive input if > 0.")
     args, _ = parser.parse_known_args()
     
     bio_train_mode = args.biotrain
@@ -141,42 +148,60 @@ def train():
     brain = BrainConnectome.load_model(MODEL_DIR)
     
     trainer = BrainTrainer(brain)
+    curriculum = SensoryCurriculum(DATASET_DIR)
     
     basenames = get_dataset_basenames()
     if not basenames:
         print("No training data found even after initialization. Exiting.")
         return
 
-    print("--- Beginning Continuous Learning Loop ---")
+    print(f"--- Beginning Continuous Learning Loop | {curriculum.get_status()} ---")
     
-    #Ask the user for the number of epochs
-    epochs = input("How many epochs to train for? ")
-    if(epochs is None or epochs == ""):
-        epochs = 1000
-    epochs = int(epochs)
+    # Use command line epochs if provided, otherwise ask
+    if args.epochs > 0:
+        epochs = args.epochs
+    else:
+        epochs = input("How many epochs to train for? ")
+        if(epochs is None or epochs == ""):
+            epochs = 1000
+        epochs = int(epochs)
     
     hippocampus = deque(maxlen=50) # Offline structural sleep buffer
     current_fovea = (0.0, 0.0) # Optical target center for active inference
+    cranky_counter = 0 # Triggers reactive sleep for persistent seizures
     
     if not bio_train_mode:
         sensory_stream = build_sensory_dataset(loader, tokenizer, basenames, TIME_STEPS)
+    
+    # --- CONNECT TO NEURO-MONITOR ---
+    streamer.connect()
     
     for epoch in range(1, epochs + 1):
         epoch_loss = 0.0
         
         if bio_train_mode:
-            # Active Inference cannot be purely asynchronous in a tf.data pipeline because T+1 depends on Motor Spikes of T!
-            for base in basenames:
-                img_path = os.path.join(DATASET_DIR, f"{base}.png")
+            # Stage-aware data selection
+            stage_basenames = curriculum.get_stage_data(basenames)
+            random.shuffle(stage_basenames)
+
+            for base in stage_basenames:
+                img_path = None
+                for ext in [".png", ".jpg", ".jpeg"]:
+                    if os.path.exists(os.path.join(DATASET_DIR, f"{base}{ext}")):
+                        img_path = os.path.join(DATASET_DIR, f"{base}{ext}")
+                        break
+                if img_path is None:
+                    img_path = os.path.join(DATASET_DIR, f"{base}.png") # fallback
+                
                 vid_path = os.path.join(DATASET_DIR, f"{base}.mp4")
                 txt_path = os.path.join(DATASET_DIR, f"{base}.txt")
                 
-                # --- CONVERSATIONAL TEXT SLIDING WINDOW ---
-                if os.path.exists(txt_path):
+                # --- CURRICULUM LEVEL 2: CONVERSATIONAL TEXT ---
+                if curriculum.current_level >= SensoryCurriculum.LEVEL_READING and os.path.exists(txt_path):
                     with open(txt_path, 'r', encoding='utf-8') as f:
                         full_text = f.read()
                     
-                    chunk_size = 128
+                    chunk_size = 6  # SLOW-READING FIX: 1 character every 5 steps
                     if len(full_text) > 10:
                         for i in range(0, max(1, len(full_text) - chunk_size), chunk_size):
                             p_str = full_text[i : i + chunk_size]
@@ -190,15 +215,18 @@ def train():
                             aud_t = tf.zeros((1, TIME_STEPS, 256), dtype=tf.float32)
                             
                             brain.reset_state()
-                            loss, brocas, imagined_vis = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True)
+                            loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True)
+                            
+                            # --- STREAM TO DASHBOARD ---
+                            streamer.stream_state(activity_map, context_text=p_str, mode="training")
+                            
                             epoch_loss += float(loss)
                             hippocampus.append((vis_t, aud_t, targ))
+                            curriculum.report_step(float(loss))
 
-                # --- CROSS-MODAL VISUAL LABELING ---
+                # --- CURRICULUM LEVEL 1: CROSS-MODAL VISUAL LABELING ---
                 text_str = base
-                # Sequential speech target
                 targ = tokenizer.process_text_as_audio(text_str, time_steps=TIME_STEPS)
-                
                 aud_t = tf.zeros((1, TIME_STEPS, 256), dtype=tf.float32)
                 
                 vis_t = None
@@ -210,25 +238,53 @@ def train():
                     vis_t = tokenizer.thalamic_routing("vision", img_t, time_steps=TIME_STEPS)
                 
                 if vis_t is not None:
-                    # Physical Experience computes Surprise natively while auto-updating STDP
                     brain.reset_state()
-                    loss, brocas, imagined_vis = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True)
+                    loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True)
+                    
+                    # --- STREAM TO DASHBOARD ---
+                    streamer.stream_state(activity_map, context_text=f"Labeling: {base}", mode="training")
+                    
                     epoch_loss += float(loss)
-                    
-                    # Store memory in hippocampus for deep sleep (without explicit derivatives)
                     hippocampus.append((vis_t, aud_t, targ))
+                    curriculum.report_step(float(loss))
                     
-                    # Motor strip directs optical gaze for NEXT physical event based on its abstraction
-                    motor_x = tf.reduce_mean(imagined_vis) * 2.0 - 1.0 
-                    motor_y = tf.math.reduce_std(imagined_vis) * 2.0 - 1.0
-                    current_fovea = (float(motor_x), float(motor_y))
+                    # Update Thalamic Shell state for gating
+                    brain.last_spike_density = float(trainer.current_activity.numpy())
+                    
+                    # --- REACTIVE OFFSHORE SLEEP (Panic Pruning) ---
+                    if brain.last_spike_density > 0.25:
+                        cranky_counter += 1
+                        if cranky_counter > 3:
+                            print("\n>>> [Homeostasis] Brain is CRANKY (Over-excited). Triggering Reactive Panic Sleep...")
+                            async_plasticity(brain, 0.005, 0.05) # Aggressive pruning
+                            cranky_counter = 0
+                            brain.reset_state()
+                    else:
+                        cranky_counter = 0
+
+                    # Optical gaze persistence
+                    new_x = tf.reduce_mean(imagined_vis) * 2.0 - 1.0 
+                    new_y = tf.math.reduce_std(imagined_vis) * 2.0 - 1.0
+                    current_fovea = (current_fovea[0] * 0.9 + float(new_x) * 0.1, current_fovea[1] * 0.9 + float(new_y) * 0.1)
         else:
             for visual_train_t, auditory_train_t, target_text_rates in sensory_stream:
                 brain.reset_state()
-                loss, _, _ = trainer.train_predictive_step(visual_train_t, auditory_train_t, target_text_rates, bio_train_mode=False)
+                loss, _, _, activity_map = trainer.train_predictive_step(visual_train_t, auditory_train_t, target_text_rates, bio_train_mode=False)
+                
+                # --- STREAM TO DASHBOARD ---
+                streamer.stream_state(activity_map, context_text="Standard BackProp Step", mode="training")
+                
                 epoch_loss += loss.numpy()
             
-        print(f"Epoch {epoch}/{epochs} | Bio-Loss: {epoch_loss:.4f}")
+        print(f"Epoch {epoch}/{epochs} | Bio-Loss: {epoch_loss:.4f} | {curriculum.get_status()}")
+        
+        # HOMEOSTATIC REGULATION: Update internal metabolism and rewards based on epoch performance
+        trainer.update_homeostasis(epoch_loss, regional_activity=activity_map if 'activity_map' in locals() else None)
+        
+        # v0.1.8: Infancy Auto-Archiving (Save the FIRST stable epoch immediately)
+        if epoch == 1:
+            print("> [Infancy] archiving first stable neural traces...")
+            brain.save_model(MODEL_DIR)
         
         if (epoch % 5 == 0):
             if bio_train_mode and len(hippocampus) > 0:

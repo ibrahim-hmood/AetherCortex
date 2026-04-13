@@ -1,2 +1,6 @@
 tensorflow==2.15.0
 opencv-python
+python-socketio
+flask 
+flask-socketio 
+eventlet

@@ -11,13 +11,14 @@ from tokenizer.sensory_tokenizer import SensoryTokenizer
 from data_ingestion.multimedia_loader import MultimediaLoader
 from tokenizer.motor_decoder import MotorDecoder
 from brain.connectome import BrainConnectome
+from diagnostics.neural_stream import streamer
 
 def main():
     parser = argparse.ArgumentParser(description="Biological Inference Engine")
     parser.add_argument("--biogen", action="store_true", help="Enable extreme biologically realistic generative loops.")
     args, _ = parser.parse_known_args()
 
-    TIME_STEPS = 75
+    TIME_STEPS = 30
 
     print("--- Biological Prompt Generation Boot Sequence ---")
     loader = MultimediaLoader(visual_target_size=(64, 64))
@@ -26,6 +27,9 @@ def main():
     
     print("> Waking up Brain Connectome (Loading HD topology)...")
     brain = BrainConnectome.load_model("biological_model")
+
+    # --- CONNECT TO NEURO-MONITOR ---
+    streamer.connect()
     
     print("\n--- Prompting Phase ---")
     prompt = input("Enter a text prompt to spark generation: ")
@@ -43,15 +47,39 @@ def main():
 
     if not args.biogen:
         # ORIGINAL INFERENCE
-        print("\n--- Standard Biological Inference Step (Reading and Thinking) ---")
+        # --- TEMPORAL SPLICING (v3.3: Step-by-Step 'Thinking' Visualization) ---
+        print("\n--- Standard Biological Inference Step (Cognitive Ripple) ---")
         start_time = time.time()
-        # Feed the visual text, and zero external sound
-        brocas_out, visual_out = brain.forward(visual_text_spikes, blind_audio)
-        print(f">> Complex thought formed in {time.time() - start_time:.4f} seconds.")
+        
+        # We process the 30-step prompt millisecond-by-millisecond to see the signal propagation
+        all_broca = []
+        all_visual = []
+        
+        for t in range(TIME_STEPS):
+            # Slice exactly 1 millisecond of the sensory spike stream
+            vis_step = visual_text_spikes[:, t:t+1, :]
+            aud_step = blind_audio[:, t:t+1, :]
+            
+            # Sub-millisecond forward pass
+            brocas_step, visual_step, _, activity_map = brain.forward(vis_step, aud_step)
+            all_broca.append(brocas_step)
+            all_visual.append(visual_step)
+            
+            # --- STREAM TO DASHBOARD (One update per millisecond) ---
+            step_context = f"Reading: {prompt} [{t+1}/{TIME_STEPS}ms]"
+            streamer.stream_state(activity_map, context_text=step_context, mode="inference")
+            
+            # Cognitive Pacing: Ensures the ripple is visible on the web dashboard
+            time.sleep(0.01)
+        
+        # Stack the results back into a 30-step tensor for the motor decoders
+        brocas_out = tf.concat(all_broca, axis=1)
+        visual_out = tf.concat(all_visual, axis=1)
+        
+        print(f">> Full cognitive cycle completed in {time.time() - start_time:.4f} seconds.")
 
         print("\n--- Multi-Modal Generation Phase ---")
         decoder.decode_to_image(visual_out, filepath="prompted_imagination.png")
-        decoder.decode_to_video(visual_out, filepath="prompted_animation.mp4")
         
         text_res = decoder.decode_to_text(brocas_out)
         print(f">> Generated Brain Text String: {text_res}")
@@ -77,7 +105,20 @@ def main():
         
         full_sentence = []
         for i in range(cycles):
-            brocas_out, _ = brain.forward(current_vis_spikes, current_audio_spikes)
+            all_broca = []
+            for sub_t in range(TIME_STEPS):
+                vis_step = current_vis_spikes[:, sub_t:sub_t+1, :]
+                aud_step = current_audio_spikes[:, sub_t:sub_t+1, :]
+                
+                brocas_step, _, _, activity_map = brain.forward(vis_step, aud_step)
+                all_broca.append(brocas_step)
+                
+                # --- STREAM TO DASHBOARD (Inner Voice Activity) ---
+                current_context = " ".join(full_sentence) if full_sentence else "Starting monologue..."
+                streamer.stream_state(activity_map, context_text=f"{current_context} [{sub_t+1}/30ms]", mode="generation")
+                time.sleep(0.005)
+
+            brocas_out = tf.concat(all_broca, axis=1)
             
             # After cycle 1, the prompt "fades" from view, relying on auditory memory/feedback
             current_vis_spikes = blind_visual
@@ -97,8 +138,22 @@ def main():
         current_vis_spikes = visual_text_spikes
         for t in range(frames):
             print(f"> Dreaming frame {t+1}/{frames}...")
-            _, visual_out = brain.forward(current_vis_spikes, blind_audio)
             
+            all_vis = []
+            for sub_t in range(TIME_STEPS):
+                # Process each dream-millisecond individually
+                vis_step = current_vis_spikes[:, sub_t:sub_t+1, :]
+                aud_step = blind_audio[:, sub_t:sub_t+1, :]
+                
+                _, visual_step, _, activity_map = brain.forward(vis_step, aud_step)
+                all_vis.append(visual_step)
+                
+                # --- STREAM TO DASHBOARD (Flicker Effect) ---
+                streamer.stream_state(activity_map, context_text=f"Dreaming frame {t+1} [{sub_t+1}/30ms]", mode="generation")
+                time.sleep(0.005) # Faster delay for dreaming
+            
+            # Reconstruct the full 30-step hallucination
+            visual_out = tf.concat(all_vis, axis=1)
             img_arr = decoder.decode_to_image(visual_out, filepath=f"temp_dream_{t}.png")
             img_tensor = tf.convert_to_tensor(img_arr, dtype=tf.float32)
             # Reconstruct visual input from the dream
@@ -114,7 +169,23 @@ def main():
         long_visual = tf.concat([prompt_segment, silence_segment], axis=1)
         long_audio = tf.zeros((1, LONG_STEPS, 256), dtype=tf.float32)
         
-        _, visual_out = brain.forward(long_visual, long_audio)
+        all_vis = []
+        for t in range(LONG_STEPS):
+            vis_step = long_visual[:, t:t+1, :]
+            aud_step = long_audio[:, t:t+1, :]
+            
+            _, visual_step, _, activity_map = brain.forward(vis_step, aud_step)
+            all_vis.append(visual_step)
+            
+            # --- STREAM TO DASHBOARD (Deep Wave) ---
+            if t % 5 == 0: # Stream every 5ms for the long 300ms dream to avoid network lag
+                streamer.stream_state(activity_map, context_text=f"Deep Exposure Dream [{t+1}/300ms]", mode="generation")
+            time.sleep(0.002)
+        
+        visual_out = tf.concat(all_vis, axis=1)
+        
+        # --- STREAM TO DASHBOARD FINAL ---
+        streamer.stream_state(activity_map, context_text="Latent Directed Dreaming Finalized", mode="generation")
         decoder.decode_to_image(visual_out, filepath="deep_dream.png")
         print("\n>> Deep Latent Dream image mapping materialized into deep_dream.png")
 
@@ -126,17 +197,42 @@ def main():
         
         cycles = 15
         for i in range(cycles):
-            print(f"> Saccade Cycle {i+1}/{cycles} | Fovea: ({current_fovea_x:.2f}, {current_fovea_y:.2f})")
+            # Calculate pixel offsets from foveal coordinates (-1.0 to 1.0 range)
+            # Center (0,0) -> Offsets (32, 32) for a 64x64 patch on a 128x128 canvas
+            x_off = int(np.clip(32 + current_fovea_x * 32, 0, 64))
+            y_off = int(np.clip(32 + current_fovea_y * 32, 0, 64))
+            
+            print(f"> Saccade Cycle {i+1}/{cycles} | Fovea: ({current_fovea_x:.2f}, {current_fovea_y:.2f}) -> Offset: ({x_off}, {y_off})")
+            
+            # Extract the current foveal patch from the physical canvas
+            patch = canvas[y_off:y_off+64, x_off:x_off+64]
+            vis_tensor = tf.convert_to_tensor(patch, dtype=tf.float32)
             
             # Combine the physical eye view (patch) with the abstract reading (prompt)
             if i < 3:
                 # First cycles: Read the prompt visually to prime the imagination
                 vis_input = tokenizer.thalamic_routing("text", prompt, time_steps=TIME_STEPS)
             else:
-                # Later cycles: Look at the actual canvas
+                # Later cycles: Look at the actual canvas through the eyes (Active Inference)
                 vis_input = tokenizer.thalamic_routing("vision", vis_tensor, time_steps=TIME_STEPS)
             
-            brocas_out, visual_out = brain.forward(vis_input, blind_audio)
+            all_broca = []
+            all_vis = []
+            for sub_t in range(TIME_STEPS):
+                # Process each saccade-millisecond individually
+                vis_step = vis_input[:, sub_t:sub_t+1, :]
+                aud_step = blind_audio[:, sub_t:sub_t+1, :]
+                
+                brocas_step, visual_step, _, activity_map = brain.forward(vis_step, aud_step)
+                all_broca.append(brocas_step)
+                all_vis.append(visual_step)
+                
+                # --- STREAM TO DASHBOARD (Active Saccade ripple) ---
+                streamer.stream_state(activity_map, context_text=f"Saccade {i+1} [{sub_t+1}/30ms]", mode="generation")
+                time.sleep(0.005)
+            
+            brocas_out = tf.concat(all_broca, axis=1)
+            visual_out = tf.concat(all_vis, axis=1)
             
             img_arr = decoder.decode_to_image(visual_out, filepath="temp.png")
             
@@ -145,6 +241,7 @@ def main():
                 canvas[y_off:y_off+64, x_off:x_off+64] = cv2.addWeighted(canvas[y_off:y_off+64, x_off:x_off+64], 0.3, img_arr, 0.7, 0)
             
             # Motor cortex drives purely abstract coordinate translation
+            # Using the Broca's density and variance to simulate motor jitter
             motor_x = tf.reduce_mean(brocas_out) * 5.0 - 2.5
             motor_y = tf.math.reduce_std(brocas_out) * 5.0 - 2.5
             current_fovea_x = float(motor_x)
