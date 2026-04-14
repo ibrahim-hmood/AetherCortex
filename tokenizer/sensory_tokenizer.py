@@ -11,7 +11,7 @@ class SensoryTokenizer:
     Converts raw world data into mathematical arrays, and injects them
     as constant currents over T discrete time steps.
     """
-    def __init__(self, visual_dim=1024, auditory_dim=256):
+    def __init__(self, visual_dim=1024, auditory_dim=300):
         self.visual_dim = visual_dim
         self.auditory_dim = auditory_dim
 
@@ -62,44 +62,43 @@ class SensoryTokenizer:
 
     def process_text_visually(self, text_string, time_steps):
         """
-        BIOMIMETIC READING: Renders text as a rolling visual sequence.
-        This allows the Visual Cortex to scan characters over time.
+        BIOMIMETIC READING: Renders text centered on a 128x128 canvas.
+        This allows the Visual Cortex to scan characters immediately.
         """
         if cv2 is None:
             # Fallback to zeros if cv2 missing
             return tf.zeros((1, time_steps, self.visual_dim), dtype=tf.float32)
 
-        # Create a single long strip for the entire text
-        char_w = 25
-        canvas_width = max(64, len(text_string) * char_w + 128)
-        canvas_height = 64
-        strip = np.zeros((canvas_height, canvas_width, 1), dtype=np.uint8)
+        # Create a static 128x128 canvas
+        canvas_h, canvas_w = 128, 128
+        frame = np.zeros((canvas_h, canvas_w, 1), dtype=np.uint8)
         
-        # Draw the text centrally on the strip with a more legible biological scale
-        # 0.8 scale fits perfectly in the 64px vertical space
-        cv2.putText(strip, text_string, (64, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.8, 255, 2)
+        # Calculate centering coordinates (v4.5: High Contrast Boost)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 1.3
+        thickness = 3
+        (text_w, text_h), baseline = cv2.getTextSize(text_string, font, font_scale, thickness)
         
-        processed_frames = []
-        # The text scrolls from right to left across the 64x64 window
-        total_scroll = canvas_width - 64
-        shift_per_step = total_scroll / time_steps if time_steps > 1 else 0
+        # Center horizontally and vertically
+        text_x = (canvas_w - text_w) // 2
+        text_y = (canvas_h + text_h) // 2
         
-        for t in range(time_steps):
-            x_start = int(t * shift_per_step)
-            frame_gray = strip[:, x_start:x_start+64]
-            # Convert to RGB to match the visual cortex input format
-            frame_rgb = cv2.cvtColor(frame_gray, cv2.COLOR_GRAY2RGB)
+        cv2.putText(frame, text_string, (text_x, text_y), font, font_scale, 255, thickness)
+        
+        # Convert to RGB and normalize
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+        flat = tf.reshape(tf.cast(frame_rgb, tf.float32), [-1]) / 255.0
+        
+        # Static reading: Use the same frame for all time steps
+        current_len = tf.shape(flat)[0]
+        # v4.4: visual_dim is now 128*128*3 = 49152
+        if current_len < self.visual_dim:
+            flat = tf.pad(flat, [[0, self.visual_dim - current_len]])
+        else:
+            flat = flat[:self.visual_dim]
             
-            flat = tf.reshape(tf.cast(frame_rgb, tf.float32), [-1]) / 255.0
-            current_len = tf.shape(flat)[0]
-            if current_len < self.visual_dim:
-                flat = tf.pad(flat, [[0, self.visual_dim - current_len]])
-            else:
-                flat = flat[:self.visual_dim]
-            processed_frames.append(flat)
-            
-        stacked = tf.stack(processed_frames)
-        return tf.expand_dims(stacked, 0)
+        processed_frame = tf.expand_dims(flat, 0)
+        return tf.repeat(tf.expand_dims(processed_frame, 0), time_steps, axis=1)
 
     def process_text_as_audio(self, text_string, time_steps):
         """

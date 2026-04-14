@@ -5,7 +5,7 @@ class ExecutiveFrontalCortex(SubCortexNetwork):
     Prefrontal Cortex analogue using Spiking Neural Networks. 
     Integrates spike trains from all other cortices over time to form a 'thought'.
     """
-    def __init__(self, combined_sensory_dim=256, cognitive_dim=512, threshold=1.0, noise_std=0.01, init_stddev=0.1, facilitation=False):
+    def __init__(self, combined_sensory_dim=300, cognitive_dim=512, threshold=1.0, noise_std=0.01, init_stddev=0.1, facilitation=False):
         super().__init__(name="Prefrontal Cortex")
         
         # Assimilating multi-modal perception

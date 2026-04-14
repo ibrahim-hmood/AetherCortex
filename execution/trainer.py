@@ -12,14 +12,24 @@ class BrainTrainer:
         self.optimizer = tf.optimizers.Adam(learning_rate=self.base_lr)
         
         # HOMEOSTATIC PARAMETERS: Evolving based on neural behavior
-        self.metabolic_cost = tf.Variable(0.5, trainable=False, name="metabolic_cost")
+        self.metabolic_cost = tf.Variable(0.2, trainable=False, name="metabolic_cost")
         self.pos_weight = tf.Variable(30.0, trainable=False, name="linguistic_reward")
         self.focus_word = "" # v4.2 Focused Curriculum
         self.current_activity = tf.Variable(0.0, trainable=False, name="spike_density")
         
         # History for stagnation detection
         self.prev_epoch_loss = tf.Variable(0.0, trainable=False)
+        self.prev_loss = tf.Variable(1.0, trainable=False)
         self.stagnation_counter = tf.Variable(0, trainable=False)
+
+        # v4.4: Validation Metrics (Real-Time Fractions)
+        self.total_validations = tf.Variable(0, dtype=tf.int64, trainable=False, name="total_validations")
+        self.good_validations = tf.Variable(0, dtype=tf.int64, trainable=False, name="good_validations")
+        self.bad_validations = tf.Variable(0, dtype=tf.int64, trainable=False, name="bad_validations")
+        
+        # v4.5: Atomic Vocabulary Mastery (Word-level permanence tracking)
+        # managed in eagar mode to avoid tf.function string limitations
+        self.vocab_mastery = {} 
 
     def update_homeostasis(self, epoch_loss, regional_activity=None):
         """
@@ -111,72 +121,81 @@ class BrainTrainer:
 
         print(f"> Internal State | Tax: {effective_tax:.2f} (Fear: {saliency_fear:.2f}) | P-Weight: {self.pos_weight.numpy():.1f} | global_activity: {global_activity:.2%}")
 
-    @tf.function
-    def train_predictive_step(self, visual_train_t, auditory_train_t, target_speech_spikes_t_plus_1, bio_train_mode=False, context_str=""):
+    @tf.function(input_signature=[
+        tf.TensorSpec(shape=[None, 30, 49152], dtype=tf.float32), 
+        tf.TensorSpec(shape=[None, 30, 300], dtype=tf.float32), 
+        tf.TensorSpec(shape=[None, 30, 300], dtype=tf.float32),
+        tf.TensorSpec(shape=[], dtype=tf.bool)
+    ])
+    def train_predictive_step(self, visual_train_t, auditory_train_t, target_speech_spikes_t_plus_1, bio_train_mode=False):
         # --- GLOBAL MEMBRANE DISCHARGE ---
         # Clear all residual electrical potential before every sentence.
         # This breaks Neural Rigor Mortis / Seizure loops.
         self.brain.reset_state()
         
         if bio_train_mode:
+            # v4.5: PURE BIOLOGICAL LEARNING (BackProp Removed)
+            # The brain now learns strictly through local R-STDP and homeostatic scaling.
+            # There is no global gradient tape tracking the weights in this mode.
+            
+            # --- DYNAMIC FORWARD PASS ---
             brocas_spikes, visual_spikes, internal_activity, regional_activity = self.brain.forward(visual_train_t, auditory_train_t)
-            self.current_activity.assign(internal_activity) # Update persistent sensor
-
+            self.current_activity.assign(internal_activity)
+            
+            # --- TELEMETRY LOSS (Diagnostic Only) ---
             weighted_mask = 1.0 + target_speech_spikes_t_plus_1 * (self.pos_weight - 1.0)
             text_loss = tf.reduce_mean(weighted_mask * tf.square(brocas_spikes - target_speech_spikes_t_plus_1))
-            
             visual_loss = tf.reduce_mean(tf.square(
                 tf.reduce_mean(visual_spikes, axis=1) - tf.reduce_mean(visual_train_t, axis=1)
             ))
-            
-            total_loss = text_loss + visual_loss
-            
-            # --- DOPAMINERGIC SCAFFOLDING (Parental Feedback) ---
-            # If the model emits spikes that align with the target (Partial Success),
-            # we provide an "Adrenaline/Dopamine" burst to strongly reinforce the trace.
-            target_mask = tf.cast(target_speech_spikes_t_plus_1 > 0.5, tf.float32)
-            model_mask = tf.cast(brocas_spikes > 0.5, tf.float32)
-            
-            overlap = tf.reduce_sum(model_mask * target_mask)
-            total_targets = tf.reduce_sum(target_mask)
-            
-            # If we hit at least 5% of the target spikes, it's a "First Word" attempt.
-            if total_targets > 0 and (overlap / total_targets) > 0.05:
-                self.pos_weight.assign_add(2.0)
-                tf.print(">>> [Feedback] GOOD JOB! Neural alignment detected. Boosting reward.")
-            
-            # --- DOPAMINERGIC GATING (Basal Ganglia Feedback) ---
-            # Success (Low Loss) floods the system with Dopamine, lowering the barrier 
-            # for future motor actions. 
-            # --- DOPAMINE REWARD v4.0 ---
-            # High reward (dopamine) for loss reduction.
-            # v4.1: Added Dopamine Floor (0.25) to prevent Neural Coma/Apathy.
-            dopamine = tf.math.exp(-tf.clip_by_value(total_loss, 0.0, 5.0)) * 2.0
-            
-            # v4.2 Focused Curriculum: Double dopamine if target word is in context
-            if self.focus_word:
-                # We use tf.strings.regex_full_match or simple check if handled at higher level
-                # But since we pass it as a string, we check it here (note: if @tf.function, must use tf ops)
-                pass 
+            total_loss = text_loss + visual_loss + (internal_activity * self.metabolic_cost)
+
+            # --- LIBMIC DOPAMINE SIGNAL ---
+            # Reward is based on loss improvement (Differential Dopamine)
+            accuracy = 1.0 / (text_loss + 1e-6)
+            baseline = 1.0 / (self.prev_loss + 1e-6)
+            dopamine = accuracy / (baseline + 1e-6)
+            self.prev_loss.assign(text_loss)
             
             dopamine = tf.maximum(dopamine, 0.25)
             self.brain.dopamine_level.assign(dopamine)
             
-            # --- AUTONOMOUS BALANCE (v3.0) ---
+            # v4.3 DYNAMIC NEURAL TAXATION
+            new_tax = 0.01 + (tf.stop_gradient(total_loss) * 0.2)
+            self.metabolic_cost.assign(tf.clip_by_value(new_tax, 0.01, 2.0))
+            
+            scaled_reward = 10.0 * dopamine 
+            self.pos_weight.assign(tf.clip_by_value(scaled_reward, 1.0, 50.0))
+
+            # --- TRACK VALIDATION METRICS ---
+            self.total_validations.assign_add(1)
+            if dopamine > 1.05: 
+                self.good_validations.assign_add(1)
+            elif dopamine < 0.80: 
+                self.bad_validations.assign_add(1)
+
+            # --- BIOLOGICAL PLASTICITY (R-STDP) ---
+            self.brain.update_hebbian_traces()
             self.brain.apply_homeostatic_regulation(regional_activity)
             
-            self.brain.update_hebbian_traces()
+            # No Optimizer update here. Learning driven strictly by synaptic traces + dopamine
             self.brain.apply_stdp(learning_rate=1e-4, metabolic_tax=self.metabolic_cost)
 
             return total_loss, brocas_spikes, visual_spikes, regional_activity
         else:
+            # Standard AI Hybrid Training (Maintained for reference/heavy initialization)
             with tf.GradientTape() as tape:
                 drop_vision = tf.random.uniform([]) < 0.5
                 forward_visual = tf.cond(drop_vision, lambda: tf.zeros_like(visual_train_t), lambda: visual_train_t)
 
                 brocas_spikes, visual_spikes, internal_activity, regional_activity = self.brain.forward(forward_visual, auditory_train_t)
-                self.current_activity.assign(internal_activity) # Update persistent density measure
+                self.current_activity.assign(internal_activity)
                 
+                weighted_mask = 1.0 + target_speech_spikes_t_plus_1 * (self.pos_weight - 1.0)
+                text_loss = tf.reduce_mean(weighted_mask * tf.square(brocas_spikes - target_speech_spikes_t_plus_1))
+                visual_loss = tf.reduce_mean(tf.square(
+                    tf.reduce_mean(visual_spikes, axis=1) - tf.reduce_mean(visual_train_t, axis=1)
+                ))
                 total_loss = text_loss + visual_loss + (internal_activity * self.metabolic_cost)
 
             trainable_vars = self.brain.get_variables()
@@ -184,8 +203,6 @@ class BrainTrainer:
             self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
             self.brain.update_hebbian_traces()
-            
-            # --- AUTONOMOUS BALANCE (v3.0) ---
             self.brain.apply_homeostatic_regulation(regional_activity)
 
             return total_loss, brocas_spikes, visual_spikes, regional_activity
@@ -207,3 +224,38 @@ class BrainTrainer:
         
         print(f">> Sleep Complete | Pruned: {int(pruned_count)} | Grown: {int(grown_count)}")
         return pruned_count, grown_count
+
+    def record_word_mastery(self, word, brocas_output):
+        """
+        v4.5: Neural Fingerprinting.
+        Calculates how 'permanent' (myelinated) the connection for a specific 
+        word has become by checking the active ensemble in the language area.
+        """
+        if not word or word == "" or brocas_output is None:
+            return
+            
+        # 1. Identify which neurons fired for this word (mean over time dimension)
+        spikes = tf.reduce_mean(brocas_output, axis=1) # [batch, neurons]
+        active_mask = tf.cast(spikes > 0.05, tf.float32)
+        
+        # 2. Grab the permanence of the language area
+        # We look at the primary Broca's area layers
+        try:
+            # permanence is [input_dim, output_dim]. We care about the output neurons'
+            # total structural health. We use the synaptic permanence mask.
+            perm_matrix = self.brain.frontal_language.brocas_area.layers[0].permanence
+            
+            # Average permanence of synapses leading TO the active output neurons
+            active_permanence = tf.reduce_mean(perm_matrix, axis=0) # [output_dim]
+            word_stability = tf.reduce_sum(active_permanence * active_mask) / (tf.reduce_sum(active_mask) + 1e-6)
+            
+            # Update the global mastery registry (managed eagerly)
+            current_score = float(word_stability.numpy())
+            
+            # Clean the word (strip newlines/spaces)
+            clean_word = word.strip().upper()
+            if clean_word:
+                # Keep the HIGHEST mastery seen (don't decay mastery if it was once locked)
+                self.vocab_mastery[clean_word] = max(self.vocab_mastery.get(clean_word, 0.0), current_score)
+        except Exception:
+            pass

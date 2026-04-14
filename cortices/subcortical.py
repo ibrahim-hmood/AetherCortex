@@ -132,12 +132,24 @@ class SaliencyAmygdalaLayer(LIFCortexLayer):
     """
     def __init__(self, input_size, num_neurons=64):
         super().__init__(input_size, num_neurons, threshold=1.0, beta=0.5)
+        # v4.4 Gradient Stabilization: Since Amygdala output is discarded in current 
+        # connectome and used only for telemetry, we mark it as non-trainable 
+        # to prevent 'Gradient Void' warnings.
+        self.weights.assign(self.weights.read_value()) # Force Variable
+        self.weights = tf.Variable(self.weights, trainable=False, name="amygdala_synapses")
+        self.biases = tf.Variable(self.biases, trainable=False, name="amygdala_bias")
         self.saliency_state = tf.Variable(0.05, trainable=False, name="saliency_fear_level")
         self.baseline_fear = 0.05
 
+    def get_variables(self):
+        # Amygdala is an observer; it does not participate in global backprop
+        return []
+
     def forward(self, inputs):
-        # Processes sensory input to calculate global 'Tension'
-        # Tension = High frequency spikes in small regions (potential exclamation/danger)
+        # processes sensory input to calculate global 'Tension'
+        # v4.5: FORMAL GRADIENT SHIELD - disconnect from training tape
+        inputs = tf.stop_gradient(inputs)
+        
         batch_size = tf.shape(inputs)[0]
         time_steps = tf.shape(inputs)[1]
         

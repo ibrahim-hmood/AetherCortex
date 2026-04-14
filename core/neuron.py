@@ -23,8 +23,8 @@ class LIFCortexLayer:
         self.synaptic_x = tf.Variable(initial_value=tf.ones((1, num_neurons)), trainable=False, name="availability")
         # Pre-calculated decay constants for 16-32 step sequences
         self.u_decay = 0.9  # Facilitation decay
-        self.x_recovery = 0.8 # Depression recovery
-        self.U_inc = 0.2   # Utilization increment per spike
+        self.x_recovery = 0.98 # VESICLE REFILL (Higher = Slower recovery, better for damping seizures)
+        self.U_inc = 0.3   # RELEASE PROBABILITY (Higher = Faster Exhaustion)
         
         init_w = tf.random.normal(shape=(input_size, num_neurons), mean=0.0, stddev=init_stddev)
         self.weights = tf.Variable(initial_value=init_w, trainable=True, name="synaptic_weights")
@@ -54,7 +54,7 @@ class LIFCortexLayer:
         self.synaptic_u.assign(tf.zeros_like(self.synaptic_u))
         self.synaptic_x.assign(tf.ones_like(self.synaptic_x))
 
-    def forward(self, inputs):
+    def forward(self, inputs, habituation_gain=0.85):
         curr_b = tf.shape(inputs)[0]
         curr_t = tf.shape(inputs)[1]
         
@@ -65,20 +65,28 @@ class LIFCortexLayer:
         
         active_weights = self.weights * self.synaptic_mask
 
-        # --- SELECTIVE HABITUATION (Sensory Gating) ---
-        # Subtract persistent background from the entire sensory stream at once
+        # v0.2.8: Dynamic Thalamic Gating (The "Neural Pupil")
         h_state = tf.tile(self.habituation_state, [curr_b * curr_t, 1])
         flat_inputs = tf.reshape(inputs, [-1, self.input_size])
-        gated_inputs = flat_inputs - (h_state * 0.5)
+        gated_inputs = flat_inputs - (h_state * habituation_gain)
         
         # Projecting [Batch * Time, Input] -> [Batch * Time, Neurons]
-        # v2.5 Override: If facilitation is ON, we matmul INSIDE the loop for per-step gain.
-        if not self.facilitation:
-            all_projections = tf.matmul(gated_inputs, active_weights) + self.biases
-            all_projections = tf.reshape(all_projections, [curr_b, curr_t, self.num_neurons])
-        else:
-            # Placeholder for loop-based projection
-            all_projections = None
+        # v4.5: ASYNCHRONOUS EVENT-DRIVEN GATING (Sparsity Fix)
+        # If the input region is dark (No active spikes), we skip the intensive matmul entirely.
+        density = tf.reduce_mean(tf.abs(gated_inputs))
+        
+        # Initialize as Zeros (Default 'Silent' state)
+        all_projections = tf.zeros((curr_b, curr_t, self.num_neurons))
+        
+        if density >= 0.0001:
+            if not self.facilitation:
+                # Dense Projection for non-facilitating layers
+                proj = tf.matmul(gated_inputs, active_weights) + self.biases
+                all_projections = tf.reshape(proj, [curr_b, curr_t, self.num_neurons])
+            else:
+                # For Facilitation, all_projections stays zeros, 
+                # but the loop handles its own calculation.
+                pass
 
         u = tf.tile(self.synaptic_u, [curr_b, 1])
         x = tf.tile(self.synaptic_x, [curr_b, 1])
@@ -101,10 +109,14 @@ class LIFCortexLayer:
                 x = x * self.x_recovery + (1.0 - x) - (u * x * prev_spikes)
                 x = tf.clip_by_value(x, 0.0, 1.0)
                 
-                # Apply dynamic synaptic gain (u*x can reach ~1.0-2.0 depending on spike history)
-                # This makes 'hot' synapses temporarily 2x stronger.
-                dynamic_current = tf.matmul(gated_inputs[curr_b*t : curr_b*(t+1)], active_weights) * (u * 2.0)
-                current_input = tf.reshape(dynamic_current, [curr_b, self.num_neurons]) + self.biases
+                # v4.5: Event-Driven Gating for Facilitation
+                if density < 0.0001:
+                    current_input = tf.zeros((curr_b, self.num_neurons)) + self.biases
+                else:
+                    # Apply dynamic synaptic gain (u*x can reach ~1.0-2.0 depending on spike history)
+                    # This makes 'hot' synapses temporarily 2x stronger.
+                    dynamic_current = tf.matmul(gated_inputs[curr_b*t : curr_b*(t+1)], active_weights) * (u * 2.0)
+                    current_input = tf.reshape(dynamic_current, [curr_b, self.num_neurons]) + self.biases
             else:
                 current_input = all_projections[:, t, :]
             
@@ -122,8 +134,8 @@ class LIFCortexLayer:
             # --- LATERAL INHIBITION ---
             spikes_t_minus_1 = spike_trains.read(t-1) if t > 0 else tf.zeros((curr_b, self.num_neurons))
             spikes_t_minus_1 = tf.reshape(spikes_t_minus_1, [curr_b, self.num_neurons])
-            # Boosted inhibition from 0.25 to 0.45 for stability (Equilibrium Patch)
-            inhibition = tf.reduce_mean(spikes_t_minus_1, axis=1, keepdims=True) * 0.45 
+            # Boosted inhibition from 0.45 to 0.55 for stability (Breaking the activity lock)
+            inhibition = tf.reduce_mean(spikes_t_minus_1, axis=1, keepdims=True) * 0.55 
             v_mem = v_mem - inhibition
             
             # --- SPIKE GENERATION WITH DYNAMIC THRESHOLD ---
@@ -176,22 +188,25 @@ class LIFCortexLayer:
         effective_lr = reward_modulated_lr * tf.sign(self.weights)
         
         # 2. Austerity Decay: Metabolic tax physically starves noisy synapses
-        # Synaptic Tagging: Active synapses (high trace) resist decay (min_decay_multiplier)
-        # min_decay_multiplier logic prevents 'Consolidated' skills from being pruned.
+        # v4.5: BIT-WISE MYELINATION (Plasticity Gating)
+        # Highly myelinated (permanence > 0.95) synapses are "frozen."
+        # They no longer participate in plasticity math, effectively becoming quantized constants.
+        plasticity_mask = tf.cast(self.permanence < 0.95, tf.float32)
+        
         tag_protection = tf.cast(self.hebbian_trace > 0.5, tf.float32) * 0.1 # 90% protection
         actual_decay = (decay + (metabolic_tax * 0.005)) * self.persistence * (1.0 - tag_protection)
         
         delta = (effective_lr * self.hebbian_trace) - (actual_decay * self.weights)
-        self.weights.assign_add(delta * self.synaptic_mask)
+        self.weights.assign_add(delta * self.synaptic_mask * plasticity_mask)
 
         # --- SYNAPTIC PERMANENCE (LTM Archiving) ---
         # Myelination: If reward is high, grow permanence (lock-in)
-        # Gold Medal Threshold: 1.5 (Aha! moments)
-        myelin_growth = tf.where(dopamine > 1.5, self.hebbian_trace * 0.05, tf.zeros_like(self.hebbian_trace))
+        # v0.5.1 Infancy Patch: 5x Speed (0.05 -> 0.25)
+        myelin_growth = tf.where(dopamine > 1.5, self.hebbian_trace * 0.25, tf.zeros_like(self.hebbian_trace))
         
         # Demyelination: If apathy is sustained, slowly forget (Risk Mitigation)
-        # Apathy Threshold: 0.5 (Frustration/Mistakes)
-        forgetting = tf.where(dopamine < 0.5, 0.001, 0.0)
+        # v0.5.1 Infancy Patch: 2x Speed (0.001 -> 0.002)
+        forgetting = tf.where(dopamine < 0.5, 0.002, 0.0)
         
         self.permanence.assign(tf.clip_by_value(self.permanence * (1.0 - forgetting) + myelin_growth, 0.0, 1.0))
 
@@ -232,11 +247,12 @@ class LIFCortexLayer:
         return grown_count
 
     def get_variables(self):
-        return [self.weights, self.biases, self.permanence]
+        # Only return differentiable parameters for the optimizer
+        return [self.weights, self.biases]
 
 class ConvLIFCortexLayer:
     """ Biological approximation of Retinotopy via restricted spatial receptive fields. """
-    def __init__(self, input_shape, filters, kernel_size, stride=1, beta=0.9, threshold=1.0, noise_std=0.01, init_stddev=0.1, persistence=1.0):
+    def __init__(self, input_shape, filters, kernel_size, stride=1, beta=0.9, threshold=1.0, noise_std=0.01, init_stddev=0.1, persistence=1.0, facilitation=False):
         self.input_shape = input_shape
         self.filters = filters
         self.kernel_size = kernel_size
@@ -256,20 +272,34 @@ class ConvLIFCortexLayer:
         self.hebbian_trace = tf.Variable(initial_value=tf.zeros_like(self.weights), trainable=False, name="hebbian_trace")
         self.permanence = tf.Variable(initial_value=tf.zeros_like(self.weights), trainable=False, name="conv_permanence")
         
+        # Calculate output dimensions
         out_h = input_shape[0] // stride
         out_w = input_shape[1] // stride
+        
+        # --- CHEMICAL ECHOES (Synaptic Depression) ---
+        self.facilitation = facilitation
+        self.u_decay = 0.95
+        self.x_recovery = 0.98
+        self.U_inc = 0.3
+        self.synaptic_u = tf.Variable(initial_value=tf.zeros((1, out_h, out_w, filters)), trainable=False, name="conv_utilization")
+        self.synaptic_x = tf.Variable(initial_value=tf.ones((1, out_h, out_w, filters)), trainable=False, name="conv_availability")
+        
         self.v_mem = tf.Variable(initial_value=tf.zeros((1, out_h, out_w, filters)), trainable=False, name="conv_membrane")
         self.t_state = tf.Variable(initial_value=tf.ones((1, out_h, out_w, filters)) * threshold, trainable=False, name="conv_dynamic_threshold")
         
         # Habituation for spatial features
         self.habituation_state = tf.Variable(initial_value=tf.zeros((1, input_shape[0], input_shape[1], input_shape[2])), trainable=False, name="conv_habit_buffer")
+        
+        # v0.2.8: Thalamic "Inner Eye" capture for diagnostics
+        self.last_gated_input = tf.Variable(initial_value=tf.zeros((1, input_shape[0], input_shape[1], input_shape[2])), trainable=False, name="retinal_capture")
+        self.last_raw_input = tf.Variable(initial_value=tf.zeros((1, input_shape[0], input_shape[1], input_shape[2])), trainable=False, name="raw_input_capture")
 
     def reset_state(self):
         self.v_mem.assign(tf.zeros_like(self.v_mem))
         self.t_state.assign(tf.ones_like(self.t_state) * self.threshold)
         self.habituation_state.assign(tf.zeros_like(self.habituation_state))
 
-    def forward(self, inputs):
+    def forward(self, inputs, habituation_gain=0.4):
         curr_b = tf.shape(inputs)[0]
         curr_t = tf.shape(inputs)[1]
         
@@ -283,22 +313,42 @@ class ConvLIFCortexLayer:
         spike_trains = tf.TensorArray(tf.float32, size=curr_t)
         active_weights = self.weights * self.synaptic_mask
         
-        # --- SELECTIVE HABITUATION (Spatial Gating) ---
+        # v0.2.8: Transitioned to MULTIPLICATIVE GATING (Gain Control)
+        # Prevents 'Solid Black' feed by attenuating the signal rather than subtracting it.
         flat_spatial = tf.reshape(spatial_inputs, [-1, self.input_shape[0], self.input_shape[1], self.input_shape[2]])
         h_state = tf.tile(self.habituation_state, [curr_b * curr_t, 1, 1, 1])
-        gated_spatial = flat_spatial - (h_state * 0.5)
+        gated_spatial = flat_spatial * (1.0 - h_state * habituation_gain)
+        
+        # v0.2.8: Force capture even during @tf.function graph execution
+        # Previously disabled by executing_eagerly check!
+        self.last_gated_input.assign(gated_spatial[0:1, :, :, :])
+        self.last_raw_input.assign(flat_spatial[0:1, :, :, :])
         
         all_conv_currents = tf.nn.conv2d(gated_spatial, active_weights, strides=[1, self.stride, self.stride, 1], padding="SAME") + self.biases
         all_conv_currents = tf.reshape(all_conv_currents, [curr_b, curr_t, out_h, out_w, self.filters])
+
+        u = tf.tile(self.synaptic_u, [curr_b, 1, 1, 1])
+        x = tf.tile(self.synaptic_x, [curr_b, 1, 1, 1])
+        prev_spikes = tf.zeros((curr_b, out_h, out_w, self.filters))
 
         for t in tf.range(curr_t):
             tf.autograph.experimental.set_loop_options(
                 shape_invariants=[
                     (v_mem, tf.TensorShape([None, out_h, out_w, self.filters])),
-                    (t_state, tf.TensorShape([None, out_h, out_w, self.filters]))
+                    (t_state, tf.TensorShape([None, out_h, out_w, self.filters])),
+                    (u, tf.TensorShape([None, out_h, out_w, self.filters])),
+                    (x, tf.TensorShape([None, out_h, out_w, self.filters])),
+                    (prev_spikes, tf.TensorShape([None, out_h, out_w, self.filters]))
                 ]
             )
-            current_input = all_conv_currents[:, t, :, :, :]
+            
+            if self.facilitation:
+                u = u * self.u_decay + self.U_inc * (1.0 - u) * prev_spikes
+                x = x * self.x_recovery + (1.0 - x) - (u * x * prev_spikes)
+                x = tf.clip_by_value(x, 0.0, 1.0)
+                current_input = all_conv_currents[:, t, :, :, :] * (u * 2.0)
+            else:
+                current_input = all_conv_currents[:, t, :, :, :]
             
             # --- BIOLOGICAL SYNAPTIC JITTER ---
             if self.noise_std > 0:
@@ -323,10 +373,12 @@ class ConvLIFCortexLayer:
             t_state = self.threshold_variable + (t_state - self.threshold_variable) * 0.9
 
             # Update spatial habituation (Retinal persistence)
-            # Use gated_spatial[batch*t] as sensory source to update the habituation buffer
+            # v0.2.8: Slowed down accumulation from 0.1 to 0.02 (Preventing sensory blackout)
             step_spatial = tf.reshape(gated_spatial, [curr_b, curr_t, self.input_shape[0], self.input_shape[1], self.input_shape[2]])[:, t, :, :, :]
-            avg_frame = tf.reduce_mean(step_spatial, axis=0, keepdims=True)
-            self.habituation_state.assign(self.habituation_state * 0.9 + avg_frame * 0.1)
+            # Add 0.001 noise jitter to prevent '4% Stagnation'
+            jitter = tf.random.normal(tf.shape(self.habituation_state), mean=0.0, stddev=0.001)
+            avg_frame = tf.reduce_mean(step_spatial, axis=0, keepdims=True) + jitter
+            self.habituation_state.assign(tf.clip_by_value(self.habituation_state * 0.999 + avg_frame * 0.001, 0.0, 1.0))
 
             spike_trains = spike_trains.write(t, spikes)
             
@@ -336,6 +388,8 @@ class ConvLIFCortexLayer:
         # Save state
         self.v_mem.assign(v_mem[:1, :, :, :])
         self.t_state.assign(t_state[:1, :, :, :])
+        self.synaptic_u.assign(u[:1, :, :, :])
+        self.synaptic_x.assign(x[:1, :, :, :])
         
         self.last_in_rate = tf.reduce_mean(spatial_inputs, axis=[0, 1, 2, 3]) 
         self.last_out_rate = tf.reduce_mean(spikes_time_batch, axis=[0, 1, 2, 3]) 
@@ -389,7 +443,8 @@ class ConvLIFCortexLayer:
         return grown_count
 
     def get_variables(self):
-        return [self.weights, self.biases, self.permanence]
+        # Synchronize differentiable parameters (Backprop-only)
+        return [self.weights, self.biases]
 
 class RecurrentLIFCortexLayer(LIFCortexLayer):
     """ Biological Top-Down Attention mechanism """
@@ -412,7 +467,7 @@ class RecurrentLIFCortexLayer(LIFCortexLayer):
         self.prev_spikes.assign(tf.zeros_like(self.prev_spikes))
         self.t_state.assign(tf.ones_like(self.t_state) * self.threshold)
 
-    def forward(self, inputs):
+    def forward(self, inputs, habituation_gain=0.85):
         batch_size = tf.shape(inputs)[0]
         time_steps = tf.shape(inputs)[1]
         
@@ -425,9 +480,10 @@ class RecurrentLIFCortexLayer(LIFCortexLayer):
         active_recurrent_weights = self.recurrent_weights * self.recurrent_synaptic_mask
 
         # --- SELECTIVE HABITUATION (Sensory Gating) ---
+        # v0.2.8: Dynamic Thalamic Gating (The "Neural Pupil")
         flat_inputs = tf.reshape(inputs, [-1, self.input_size])
         h_state = tf.tile(self.habituation_state, [batch_size * time_steps, 1])
-        gated_inputs = flat_inputs - (h_state * 0.5)
+        gated_inputs = flat_inputs - (h_state * habituation_gain)
         
         # TEMPORAL SENSORY VECTORIZATION: Pre-project the feedforward stream.
         all_ff_projections = tf.matmul(gated_inputs, active_weights)
@@ -550,7 +606,8 @@ class RecurrentLIFCortexLayer(LIFCortexLayer):
         return grown_fw + tf.reduce_sum(new_rw_growth)
 
     def get_variables(self):
-        return [self.weights, self.recurrent_weights, self.biases, self.permanence, self.recurrent_permanence]
+        # Include recurrent weights for temporal backpropagation (BPTT)
+        return [self.weights, self.recurrent_weights, self.biases]
 
 class DeconvLIFCortexLayer:
     """ Biological Reverse-Retinotopy via Spatial Extrapolation. """
@@ -583,7 +640,7 @@ class DeconvLIFCortexLayer:
         self.v_mem.assign(tf.zeros_like(self.v_mem))
         self.t_state.assign(tf.ones_like(self.t_state) * self.threshold)
 
-    def forward(self, inputs):
+    def forward(self, inputs, habituation_gain=0.85):
         batch_size = tf.shape(inputs)[0]
         time_steps = tf.shape(inputs)[1]
         
@@ -604,8 +661,9 @@ class DeconvLIFCortexLayer:
         if not hasattr(self, 'habituation_state'):
             self.habituation_state = tf.Variable(initial_value=tf.zeros((1, self.input_shape[0], self.input_shape[1], self.input_shape[2])), trainable=False, name="deconv_habit_buffer")
             
+        # v0.2.8: Dynamic Thalamic Gating (The "Neural Pupil")
         h_state = tf.tile(self.habituation_state, [batch_size * time_steps, 1, 1, 1])
-        gated_inputs = flat_p_inputs - (h_state * 0.5)
+        gated_inputs = flat_p_inputs - (h_state * habituation_gain)
         
         output_full_shape = [batch_size * time_steps, out_h, out_w, self.filters]
         all_deconv_currents = tf.nn.conv2d_transpose(gated_inputs, active_weights, output_shape=output_full_shape, strides=[1, self.stride, self.stride, 1], padding="SAME") + self.biases
@@ -669,7 +727,8 @@ class DeconvLIFCortexLayer:
         return 0
 
     def get_variables(self):
-        return [self.weights, self.biases, self.permanence]
+        # Deconv layers are bypassed during backprop to maintain geometric consistency
+        return []
 
 class SubCortexNetwork:
     """ Regional processing center routing over time. """
@@ -680,7 +739,7 @@ class SubCortexNetwork:
     def add_layer(self, layer):
         self.layers.append(layer)
 
-    def forward(self, x, inject_x=None, inject_index=None):
+    def forward(self, x, inject_x=None, inject_index=None, habituation_gain=0.85):
         for i, layer in enumerate(self.layers):
             if inject_x is not None and i == inject_index:
                 # v2.5 Biological Injection (Top-Down Focus)
@@ -689,7 +748,16 @@ class SubCortexNetwork:
                      x = x + inject_x
                 else:
                      x = x + tf.expand_dims(inject_x, 1)
-            x = layer.forward(x)
+            
+            # Propagate the sensory gate depth to all internal layer calls
+            if hasattr(layer, 'forward'):
+                try:
+                    x = layer.forward(x, habituation_gain=habituation_gain)
+                except TypeError:
+                    # In case some specialized utility layers don't take the gain
+                    x = layer.forward(x)
+            else:
+                x = layer(x) # Fallback for native TF layers
         return x
 
     def update_hebbian_trace(self):

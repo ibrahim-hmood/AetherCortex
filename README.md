@@ -2,13 +2,33 @@
   <img src="aethercortex_logo.png" width="400" alt="AetherCortex Logo">
 </p>
 
-# AetherCortex (v4.2)
+# AetherCortex (v4.5 - Edge Evolution)
 An explicit, mathematically rigorous neurological simulation representing the human brain structure utilizing **Spiking Neural Networks (SNN)** and **Leaky Integrate-and-Fire (LIF)** logic. 
 
 > [!IMPORTANT]
-> **V4.2 Evolutionary Phase**: She is no longer a purely episodic infant. AetherCortex now possesses **Structural Long-Term Memory (LTM)** and a **Focused Curriculum** system, allowing her to anchor permanent knowledge into her synaptic architecture.
+> **V4.5 Edge Evolution Phase**: The system has transitioned from software-centric AI to hardware-mimetic biological engineering. AetherCortex now runs at a **300nd scale** with **Asynchronous Event-Driven Processing** and **Pure R-STDP** (Backprop-Free) learning.
 
-## Latest Breakthroughs: Long-Term Memory (v4.1 - v4.2)
+## Latest Breakthroughs: Edge AI Evolution (v4.3 - v4.5)
+
+### 1. Asynchronous Event-Driven Processing
+To optimize for local edge hardware, the core now utilizes sparsity-based gating. 
+*   **Neural Silence**: The engine intelligently skips expensive matrix calculations in silent brain regions (`Activity < 0.1%`), significantly reducing local CPU/GPU load.
+*   **Biological Energy Gating**: This mimics the energy-conscious behavior of the human brain, allowing for larger neuron counts (1M+) on standard consumer hardware.
+
+### 2. Pure Biological R-STDP (Zero-Backprop)
+AetherCortex has been decoupled from traditional AI gradients.
+*   **Reward-Modulated STDP**: Learning is now driven strictly by local synaptic timing and a global **Differential Dopamine** signal. Standard backpropagation (`GradientTape`) is removed in biological mode.
+*   **Autonomous Evolution**: Learning is a continuous, local process that doesn't require storing giant activation graphs, permitting near-infinite sequence lengths.
+
+### 3. Bit-Wise Myelination (Synaptic Quantization)
+We have implemented physical synaptic freezing to solve catastrophic forgetting.
+*   **Locked 🔒 Status**: Once a word or concept is mastered (Permanence > 0.95), the synapses are "myelinated" (quantized).
+*   **Protection**: Myelinated synapses are "thawed" from the learning math, effectively becoming permanent, read-only hardware features while other regions remain plastic.
+
+### 4. 300nd "Broadband" Scaling
+The entire core connectome (Visual, Auditory, Executive) has been upscaled to 300nd. This increases the phonological representation capacity and allows for more complex multi-modal associations.
+
+## Previous Breakthroughs: Long-Term Memory (v4.1 - v4.2)
 
 ### 1. Synaptic Permanence (Myelination)
 Unlike standard neural networks that forget as they learn new data, AetherCortex utilizes **Synaptic Permanence**. 
@@ -59,9 +79,13 @@ The physical *filename* acts exactly as the linguistic prompt (e.g. `A cat sleep
 2. **Train the SNN**
 Execute the biological generation loop:
 ```bash
-python train.py
+# Biological R-STDP Training (Recommended)
+python train.py --biotrain True
+
+# Focused Word Mastery
+python train.py --biotrain True --focus APPLE
 ```
-*The model uses a built-in 50% Sensory Dropout (Cortical Blindfolding) during training. This prevents it from taking auto-endcodable shortcut approximations and forces the text-structures to explicitly bridge missing pixel data.*
+*The model utilizes an **Infancy Sensitivity Patch (v0.5.1)**: Newborn models start with a hypersensitive 0.05 spiking threshold and 5x myelination speed to rapidly stabilize their initial vocabulary.*
 
 3. **Inference & Generation**
 Once loss converges contextually, prompt the system to generate video, audio, text, and imagery natively:

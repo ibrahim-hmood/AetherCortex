@@ -76,7 +76,14 @@ def async_plasticity(brain, prune_threshold, grow_threshold):
 def build_sensory_dataset(loader, tokenizer, basenames, time_steps):
     def gen():
         for base in basenames:
-            img_path = os.path.join(DATASET_DIR, f"{base}.png")
+            # v0.2.8: Flexible extension detection (Support .jpg, .jpeg, .png)
+            img_path = None
+            for ext in [".png", ".jpg", ".jpeg"]:
+                test_path = os.path.join(DATASET_DIR, f"{base}{ext}")
+                if os.path.exists(test_path):
+                    img_path = test_path
+                    break
+            
             vid_path = os.path.join(DATASET_DIR, f"{base}.mp4")
             txt_path = os.path.join(DATASET_DIR, f"{base}.txt")
             
@@ -100,7 +107,7 @@ def build_sensory_dataset(loader, tokenizer, basenames, time_steps):
                         targ = tokenizer.process_text_as_audio(t_str, time_steps=time_steps)
                         
                         # No external sound during reading
-                        aud_t = tf.zeros((1, time_steps, 256), dtype=tf.float32)
+                        aud_t = tf.zeros((1, time_steps, 300), dtype=tf.float32)
                         
                         yield vis_t, aud_t, targ
 
@@ -110,23 +117,23 @@ def build_sensory_dataset(loader, tokenizer, basenames, time_steps):
             targ = tokenizer.process_text_as_audio(text_str, time_steps=time_steps)
             
             # External sound is zero
-            aud_t = tf.zeros((1, time_steps, 256), dtype=tf.float32)
+            aud_t = tf.zeros((1, time_steps, 300), dtype=tf.float32)
             
             if os.path.exists(vid_path):
                 frames = loader.load_video_frames(vid_path, max_frames=time_steps)
                 vis_t = tokenizer.thalamic_routing("video", frames, time_steps=time_steps)
                 yield vis_t, aud_t, targ
                 
-            if os.path.exists(img_path):
+            if img_path and os.path.exists(img_path):
                 img_t = loader.load_image(img_path)
                 vis_t = tokenizer.thalamic_routing("vision", img_t, time_steps=time_steps)
                 yield vis_t, aud_t, targ
 
     # Native tensor dimensions out of the thalamus 
     sig = (
-        tf.TensorSpec(shape=(1, time_steps, 12288), dtype=tf.float32),
-        tf.TensorSpec(shape=(1, time_steps, 256), dtype=tf.float32),
-        tf.TensorSpec(shape=(1, time_steps, 256), dtype=tf.float32)  # Sequential speech target
+        tf.TensorSpec(shape=(1, time_steps, 49152), dtype=tf.float32),
+        tf.TensorSpec(shape=(1, time_steps, 300), dtype=tf.float32),
+        tf.TensorSpec(shape=(1, time_steps, 300), dtype=tf.float32)  # Sequential speech target
     )
     # Autotune creates an asynchronous pipeline on the CPU, feeding the Edge GPU relentlessly
     return tf.data.Dataset.from_generator(gen, output_signature=sig).prefetch(tf.data.AUTOTUNE)
@@ -144,12 +151,19 @@ def train():
     
     ensure_dummy_dataset()
     
-    loader = MultimediaLoader(visual_target_size=(64, 64))
+    loader = MultimediaLoader(visual_target_size=(128, 128))
     
-    # 64x64x3 = 12288 native dimensions
-    tokenizer = SensoryTokenizer(visual_dim=12288, auditory_dim=256)
+    # 128x128x3 = 49152 native dimensions
+    tokenizer = SensoryTokenizer(visual_dim=49152, auditory_dim=300)
     
     print("> Subconsciously loading Brain Connectome topography...")
+    if not os.path.exists(MODEL_DIR):
+        os.makedirs(MODEL_DIR)
+        # Create minimal config if missing
+        with open(os.path.join(MODEL_DIR, "config.json"), "w") as f:
+            import json
+            json.dump({"visual_input_dim": 49152, "auditory_input_dim": 300}, f)
+            
     brain = BrainConnectome.load_model(MODEL_DIR)
     
     trainer = BrainTrainer(brain)
@@ -205,36 +219,44 @@ def train():
                 # --- CURRICULUM LEVEL 2: CONVERSATIONAL TEXT ---
                 if curriculum.current_level >= SensoryCurriculum.LEVEL_READING and os.path.exists(txt_path):
                     with open(txt_path, 'r', encoding='utf-8') as f:
-                        full_text = f.read()
+                        words = f.read().split()
                     
-                    chunk_size = 6  # SLOW-READING FIX: 1 character every 5 steps
-                    if len(full_text) > 10:
-                        for i in range(0, max(1, len(full_text) - chunk_size), chunk_size):
-                            p_str = full_text[i : i + chunk_size]
-                            t_str = full_text[i + 1 : i + 1 + chunk_size]
-                            if len(t_str) < len(p_str):
-                                t_str += " " * (len(p_str) - len(t_str))
-                            
-                            vis_t = tokenizer.thalamic_routing("text", p_str, time_steps=TIME_STEPS)
-                            targ = tokenizer.process_text_as_audio(t_str, time_steps=TIME_STEPS)
-                            
-                            aud_t = tf.zeros((1, TIME_STEPS, 256), dtype=tf.float32)
-                            
-                            brain.reset_state()
-                            loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True, context_str=p_str)
-                            
-                            # --- STREAM TO DASHBOARD ---
-                            p_map = brain.get_permanence_map()
-                            streamer.stream_state(activity_map, permanence_map=p_map, context_text=p_str, mode="training")
-                            
-                            epoch_loss += float(loss)
-                            hippocampus.append((vis_t, aud_t, targ))
-                            curriculum.report_step(float(loss))
+                    # v4.5: Atomic Word Gating. process each word as a standalone entity.
+                    for word in words:
+                        p_str = word.strip()
+                        t_str = p_str # Auto-associative learning (Echoing)
+                        
+                        vis_t = tokenizer.thalamic_routing("text", p_str, time_steps=TIME_STEPS)
+                        targ = tokenizer.process_text_as_audio(t_str, time_steps=TIME_STEPS)
+                        
+                        aud_t = tf.zeros((1, TIME_STEPS, 300), dtype=tf.float32)
+                        
+                        loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True)
+                        trainer.record_word_mastery(p_str, brocas)
+                        
+                        # --- STREAM TO DASHBOARD ---
+                        p_map = brain.get_permanence_map()
+                        streamer.stream_state(
+                            activity_map, 
+                            permanence_map=p_map, 
+                            context_text=p_str, 
+                            mode="training",
+                            validation_metrics={
+                                "good": int(trainer.good_validations.numpy()),
+                                "bad": int(trainer.bad_validations.numpy()),
+                                "total": int(trainer.total_validations.numpy())
+                            },
+                            vocab_health=trainer.vocab_mastery
+                        )
+                        
+                        epoch_loss += float(loss)
+                        hippocampus.append((vis_t, aud_t, targ))
+                        curriculum.report_step(float(loss))
 
                 # --- CURRICULUM LEVEL 1: CROSS-MODAL VISUAL LABELING ---
                 text_str = base
                 targ = tokenizer.process_text_as_audio(text_str, time_steps=TIME_STEPS)
-                aud_t = tf.zeros((1, TIME_STEPS, 256), dtype=tf.float32)
+                aud_t = tf.zeros((1, TIME_STEPS, 300), dtype=tf.float32)
                 
                 vis_t = None
                 if os.path.exists(vid_path):
@@ -245,12 +267,25 @@ def train():
                     vis_t = tokenizer.thalamic_routing("vision", img_t, time_steps=TIME_STEPS)
                 
                 if vis_t is not None:
-                    brain.reset_state()
-                    loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True, context_str=base)
+                    loss, brocas, imagined_vis, activity_map = trainer.train_predictive_step(vis_t, aud_t, targ, bio_train_mode=True)
+                    trainer.record_word_mastery(base, brocas)
                     
                     # --- STREAM TO DASHBOARD ---
                     p_map = brain.get_permanence_map()
-                    streamer.stream_state(activity_map, permanence_map=p_map, context_text=f"Labeling: {base}", mode="training")
+                    retinal_view = brain.get_retinal_view()
+                    streamer.stream_state(
+                        activity_map, 
+                        permanence_map=p_map, 
+                        context_text=f"{base}", 
+                        mode="training", 
+                        retinal_proto=retinal_view,
+                        validation_metrics={
+                            "good": int(trainer.good_validations.numpy()),
+                            "bad": int(trainer.bad_validations.numpy()),
+                            "total": int(trainer.total_validations.numpy())
+                        },
+                        vocab_health=trainer.vocab_mastery
+                    )
                     
                     epoch_loss += float(loss)
                     hippocampus.append((vis_t, aud_t, targ))
@@ -281,11 +316,26 @@ def train():
                 
                 # --- STREAM TO DASHBOARD ---
                 p_map = brain.get_permanence_map()
-                streamer.stream_state(activity_map, permanence_map=p_map, context_text="Standard BackProp Step", mode="training")
+                streamer.stream_state(
+                    activity_map, 
+                    permanence_map=p_map, 
+                    context_text="Standard BackProp Step", 
+                    mode="training",
+                    validation_metrics={
+                        "good": int(trainer.good_validations.numpy()),
+                        "bad": int(trainer.bad_validations.numpy()),
+                        "total": int(trainer.total_validations.numpy())
+                    }
+                )
                 
                 epoch_loss += loss.numpy()
             
-        print(f"Epoch {epoch}/{epochs} | Bio-Loss: {epoch_loss:.4f} | {curriculum.get_status()}")
+        # v4.4: Console Validation Triage
+        v_good = int(trainer.good_validations.numpy())
+        v_bad = int(trainer.bad_validations.numpy())
+        v_total = int(trainer.total_validations.numpy())
+        
+        print(f"Epoch {epoch}/{epochs} | Bio-Loss: {epoch_loss:.4f} | Validations: [Good: {v_good} / Bad: {v_bad} / Total: {v_total}] | {curriculum.get_status()}")
         
         # HOMEOSTATIC REGULATION: Update internal metabolism and rewards based on epoch performance
         trainer.update_homeostasis(epoch_loss, regional_activity=activity_map if 'activity_map' in locals() else None)
@@ -302,7 +352,7 @@ def train():
                 print("\n> Initiating Rapid Hippocampal Replay...")
                 # Replay recent high-saliency events through the brain one last time
                 for h_vis, h_aud, h_targ in list(hippocampus):
-                    trainer.train_predictive_step(h_vis, h_aud, h_targ, bio_train_mode=True, context_str="Hippocampal Replay")
+                    trainer.train_predictive_step(h_vis, h_aud, h_targ, bio_train_mode=True)
                 hippocampus.clear()
             
             # Physical Structural Consolidation (Pruning weak, Growing strong)

@@ -12,26 +12,26 @@ class BrainConnectome:
     Connects the individual SNNs into a complete biological system.
     Signals flow as spike trains [batch, time_steps, features].
     """
-    def __init__(self, visual_input_dim=12288, auditory_input_dim=256, threshold=0.15):
+    def __init__(self, visual_input_dim=49152, auditory_input_dim=300, threshold=0.05):
         # Global Sensitization Strategy:
         # We use different 'Biological Volumes' for different regions to ensure the
         # signal survives the journey from the Retina to the Tongue (Speech).
         
         # 1. Sensory Centers
-        self.visual_cortex = VisualCortex(input_shape=(64, 64, 3), v3_dim=512, threshold=threshold)
+        self.visual_cortex = VisualCortex(input_shape=(128, 128, 3), v3_dim=512, threshold=threshold, facilitation=True)
         # Persistence = 0.1 protects the linguistic auditory centers from metabolic famine
-        self.temporal_lobe = TemporalLobe(auditory_dim=auditory_input_dim, internal_dim=512, threshold=threshold, persistence=0.1)
+        self.temporal_lobe = TemporalLobe(auditory_dim=auditory_input_dim, internal_dim=512, threshold=threshold, persistence=0.1, facilitation=True)
         
         # 2. VWFA: Bridging Visual shapes into the Phonological Loop
         # High persistence ensures the reading bridge survives high-noise periods
         # Pediatric Surgery: Lowered from 0.5 to 0.2 to enable vision-to-audio bridge
-        self.vwfa_bridge = LIFCortexLayer(512, auditory_input_dim, threshold=0.2, persistence=0.1)
+        self.vwfa_bridge = LIFCortexLayer(512, auditory_input_dim, threshold=0.2, persistence=0.1, facilitation=True)
         
         # 3. Integration & Executive
         from cortices.subcortical import HippocampalIndexLayer, GatedStriatalLayer, SaliencyAmygdalaLayer, CerebellarSmoothCore
         from cortices.executive import ExecutiveFrontalCortex
         
-        self.integration_layer = RecurrentLIFCortexLayer(1024, 1024, threshold=threshold) # Visual + Audio combined
+        self.integration_layer = RecurrentLIFCortexLayer(1024, 1024, threshold=threshold, facilitation=True) # Visual + Audio combined
         self.hippocampus = HippocampalIndexLayer(1024, 1024, threshold=0.1)
         
         # v2.5 Biological Upgrade: Early Infancy Hypersensitivity (0.2 -> 0.05)
@@ -45,17 +45,21 @@ class BrainConnectome:
         # 4. Sub-cortical Hubs
         self.amygdala = SaliencyAmygdalaLayer(1024, num_neurons=64)
         self.basal_ganglia = GatedStriatalLayer(512, 512, threshold=0.2)
-        self.cerebellum = CerebellarSmoothCore(256, 256)
+        self.cerebellum = CerebellarSmoothCore(300, 300)
         
         # 5. Motor hubs
         # Broca's Area: Protected from pruning via persistence=0.1
         # Aligned input to PFC output (512) to prevent information loss
         # v2.5 Biological Upgrade: Early Infancy Hypersensitivity (0.2 -> 0.05)
         self.frontal_language = FrontalLanguageCortex(semantic_input_dim=512, motor_output_dim=auditory_input_dim, threshold=0.05, persistence=0.1, facilitation=True)
-        self.visual_motor_strip = VisualMotorCortex(executive_dim=512, decode_shape=(64, 64, 3), threshold=threshold)
+        self.visual_motor_strip = VisualMotorCortex(executive_dim=512, decode_shape=(128, 128, 3), threshold=threshold)
 
         # --- LIBMIC REWARD SYSTEM (v4.0 Dopamine Upgrade) ---
         self.dopamine_level = tf.Variable(1.0, trainable=False, name="global_dopamine")
+        
+        # --- THE NEURAL PUPIL (v0.2.8 Dynamic Thalamic Gating) ---
+        # Starts at neutral (0.5). Dilates when silent (down to 0.1), contracts when noisy (up to 0.95).
+        self.habituation_pupil = tf.Variable(0.5, trainable=False, name="thalamic_pupil")
         
         # --- REGIONAL METABOLIC MAP (v3.0 Homeostatic Autonomy) ---
         self.regional_threshold_map = {
@@ -79,7 +83,7 @@ class BrainConnectome:
             "motor_strip": 0.10
         }
         
-        self.homeostatic_drift_rate = 0.005 # How fast sensitivity adapts per batch
+        self.homeostatic_drift_rate = 0.02 # Infancy Boost: Faster sensitivity adaptation
 
     def forward(self, processed_vision_train, processed_audio_train):
         """
@@ -88,45 +92,65 @@ class BrainConnectome:
         """
         # --- THALAMIC SENSORY GATING (TRN Shell) ---
         last_activity = getattr(self, 'last_spike_density', 0.0)
+        
+        # 1. Scalar Gating (Gain Control)
         gating_factor = float(np.exp(-10.0 * max(0.0, last_activity - 0.15)))
+        
+        # 2. Habituation Gating (The "Neural Pupil" v0.2.8)
+        # Dilate for silence, contract for noise.
+        # v0.2.8: Aggressive recovery for silence; fast contraction for seizures.
+        if last_activity > 0.10: 
+            self.habituation_pupil.assign_add(0.08) # Faster sunglasses (Protection)
+        elif last_activity < 0.02: 
+            self.habituation_pupil.assign_sub(0.05) # Faster night-vision (Discovery)
+        
+        # v0.2.8: Lowered max cap to 0.65 to prevent 'Total Blackout'
+        self.habituation_pupil.assign(tf.clip_by_value(self.habituation_pupil, 0.05, 0.65))
+        current_gate = self.habituation_pupil.read_value()
         
         # --- REENTRANT FEEDBACK (Top-Down Focus) ---
         # PFC output from previous step influences High-Level Visual Comprehension (Attention/V3)
-        visual_thought = self.visual_cortex.forward(processed_vision_train)
+        visual_thought = self.visual_cortex.forward(processed_vision_train, habituation_gain=current_gate)
         # Apply Top-Down gain to the semantic visual representation
-        pfc_feedback = tf.expand_dims(self.prev_pfc_spikes, 1) * 0.05
+        # v0.2.8: Dampen feedback when pupil is contracted to help break seizures
+        feedback_gate = (1.0 - current_gate)
+        pfc_feedback = tf.expand_dims(self.prev_pfc_spikes, 1) * (0.05 * feedback_gate)
         visual_thought = visual_thought + pfc_feedback
         
         # BIOMIMETIC READING (VWFA): Bridging Visual shapes into the Phonological Loop
-        internal_voice = self.vwfa_bridge.forward(visual_thought)
+        internal_voice = self.vwfa_bridge.forward(visual_thought, habituation_gain=current_gate)
         
-        # --- REENTRANT FEEDBACK (Self-Talk) ---
         # Broca's output from previous step is heard by the ears (Phonological Loop)
-        broca_feedback = tf.expand_dims(self.prev_broca_spikes, 1) * 0.1
+        # v0.2.8: Dampen feedback when pupil is contracted
+        feedback_gate = (1.0 - current_gate)
+        broca_feedback = tf.expand_dims(self.prev_broca_spikes, 1) * (0.1 * feedback_gate)
         # Combine physical external sound and internal voice of text
         audio_stream = processed_audio_train + (internal_voice * 0.1) + broca_feedback
         
         # Temporal processing (Comprehension)
-        audio_thought = self.temporal_lobe.process_comprehension(audio_stream)
+        audio_thought = self.temporal_lobe.process_comprehension(audio_stream, habituation_gain=current_gate)
         
         # --- SUB-CORTICAL INTERVENTION (Saliency) ---
         sensory_hub = tf.concat([visual_thought, audio_thought], axis=-1)
-        self.amygdala.forward(sensory_hub)
+        self.amygdala.forward(sensory_hub) # Amygdala is internal, doesn't need the gate
         
         # Parietal integration
-        integrated = self.integration_layer.forward(sensory_hub)
+        integrated = self.integration_layer.forward(sensory_hub, habituation_gain=current_gate)
         
         # --- SUB-CORTICAL INTERVENTION (Memory) ---
+        # Hippocampus uses indexing, bypasses sensory gate
         memory_boosted_integrated = self.hippocampus.forward(integrated)
         
-        executive_decision = self.prefrontal_cortex.forward(memory_boosted_integrated)
+        executive_decision = self.prefrontal_cortex.forward(memory_boosted_integrated, habituation_gain=current_gate)
         
         # --- SUB-CORTICAL INTERVENTION (Action Selection) ---
+        # Basal Ganglia gated intent
         gated_executive_intent = self.basal_ganglia.forward(executive_decision)
         
         # Generate language response using the GATED intent
         # --- SYNAPTIC GAIN INJECTION v2.2 ---
         # 1.5x Multiplier to overdrive the Basal Ganglia gate
+        # v0.2.8: Broca is an OUTPUT area; it is no longer suppressed by the sensory habituation pupil.
         raw_response_spikes = self.frontal_language.process_generation_prep(gated_executive_intent * 1.5)
         
         # --- SUB-CORTICAL INTERVENTION (Motor Precision) ---
@@ -222,6 +246,22 @@ class BrainConnectome:
         for layer in self.all_layers():
             total_grown += layer.grow(threshold=threshold)
         return total_grown
+
+    def get_retinal_view(self):
+        """Retrieves both RAW and GATED V1 inputs for diagnostic comparison."""
+        try:
+            # The first layer of VisualCortex is our V1/Retina entry point
+            entry_layer = self.visual_cortex.layers[0]
+            views = {}
+            if hasattr(entry_layer, 'last_gated_input'):
+                views['gated'] = entry_layer.last_gated_input.read_value().numpy()
+            if hasattr(entry_layer, 'last_raw_input'):
+                views['raw'] = entry_layer.last_raw_input.read_value().numpy()
+            
+            return views if views else None
+        except Exception:
+            pass
+        return None
 
     def get_permanence_map(self):
         """Calculates the average Synaptic Permanence (LTM) for every brain region."""
@@ -385,8 +425,8 @@ class BrainConnectome:
             os.makedirs(model_dir)
             
         config = {
-            "visual_input_dim": 12288,
-            "auditory_input_dim": 256
+            "visual_input_dim": 49152,
+            "auditory_input_dim": 300
         }
         
         with open(os.path.join(model_dir, "config.json"), "w") as f:
@@ -409,8 +449,8 @@ class BrainConnectome:
             config = json.load(f)
             
         # Natively reconstruct the explicit biological scaffolding
-        brain = cls(visual_input_dim=config.get("visual_input_dim", 12288), 
-                    auditory_input_dim=config.get("auditory_input_dim", 256))
+        brain = cls(visual_input_dim=config.get("visual_input_dim", 49152), 
+                    auditory_input_dim=config.get("auditory_input_dim", 300))
                     
         # Inject the physical synaptic bloodlines into the skeleton
         brain.load_weights(weights_path)

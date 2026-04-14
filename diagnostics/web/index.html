@@ -198,18 +198,49 @@
                     <span class="block text-[8px] text-green-500/50 font-bold uppercase mb-1">Synaptic Health</span>
                     <span id="stat-health" class="text-xl font-bold text-green-400">STABLE</span>
                 </div>
+                <!-- v4.4: Validation Success Meter -->
+                <div class="px-5 py-3 border border-emerald-500/20 rounded-2xl bg-emerald-500/5 backdrop-blur-md min-w-[120px]">
+                    <span class="block text-[8px] text-emerald-500/50 font-bold uppercase mb-1">Success Events</span>
+                    <span id="stat-success" class="text-xl font-bold text-emerald-400 font-mono">0 / 0</span>
+                </div>
+                <!-- v4.4: Validation Frustration Meter -->
+                <div class="px-5 py-3 border border-rose-500/20 rounded-2xl bg-rose-500/5 backdrop-blur-md min-w-[120px]">
+                    <span class="block text-[8px] text-rose-500/50 font-bold uppercase mb-1">Frustration Events</span>
+                    <span id="stat-frustration" class="text-xl font-bold text-rose-400 font-mono">0 / 0</span>
+                </div>
             </div>
         </div>
 
         <!-- Sidebar (Logs & Buffer) -->
         <div class="w-96 flex flex-col gap-6">
             <div class="glass-panel p-6 flex flex-col h-1/2">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Thought Stream Output</h3>
-                    <span class="text-[8px] px-2 py-0.5 bg-cyan-900/50 text-cyan-400 rounded-lg">LIVE_ASCII</span>
+                <!-- v4.5: Sidebar Tab System -->
+                <div class="flex gap-4 border-b border-white/5 mb-4 pb-2">
+                    <button id="tab-btn-logs" onclick="switchSidebarTab('logs')" class="text-[10px] font-bold text-cyan-400 uppercase tracking-widest border-b-2 border-cyan-400 pb-1">Cognitive Logs</button>
+                    <button id="tab-btn-vocab" onclick="switchSidebarTab('vocab')" class="text-[10px] font-bold text-gray-500 uppercase tracking-widest hover:text-white transition pb-1">Atomic Dictionary</button>
                 </div>
-                <div id="buffer-container" class="flex-grow font-mono text-sm text-cyan-100/80 overflow-y-auto italic bg-black/20 rounded-xl p-4 leading-relaxed custom-scrollbar">
-                    Awaiting synaptic transmission...
+
+                <div id="sidebar-tab-content-logs" class="flex flex-col flex-grow overflow-hidden">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Thought Stream Output</h3>
+                        <span class="text-[8px] px-2 py-0.5 bg-cyan-900/50 text-cyan-400 rounded-lg">LIVE_ASCII</span>
+                    </div>
+                    <div id="buffer-container" class="flex-grow font-mono text-sm text-cyan-100/80 overflow-y-auto italic bg-black/20 rounded-xl p-4 leading-relaxed custom-scrollbar mb-4">
+                        Awaiting synaptic transmission...
+                    </div>
+                    <div id="log-container" class="h-32 font-mono text-[10px] text-gray-600 space-y-2 overflow-y-auto custom-scrollbar">
+                        <!-- Logs injection -->
+                    </div>
+                </div>
+
+                <div id="sidebar-tab-content-vocab" class="hidden flex flex-col flex-grow overflow-hidden">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Vocabulary Myelination</h3>
+                        <span id="vocab-count" class="text-[8px] px-2 py-0.5 bg-amber-900/50 text-amber-400 rounded-lg">0 WORDS</span>
+                    </div>
+                    <div id="vocab-container" class="flex-grow flex flex-col gap-2 overflow-y-auto custom-scrollbar">
+                        <div class="text-center py-10 text-gray-700 text-[10px] uppercase font-bold italic">No atoms myelinated yet...</div>
+                    </div>
                 </div>
             </div>
 
@@ -218,8 +249,34 @@
                 <div id="permanence-container" class="grid grid-cols-2 gap-2 mb-4">
                     <!-- Dynamic Permanence Slots -->
                 </div>
-                <div id="log-container" class="flex-grow font-mono text-[10px] text-gray-600 space-y-2 overflow-y-auto custom-scrollbar">
-                    <!-- Logs injection -->
+            </div>
+
+            <!-- v0.2.8: Thalamic Dual-Retinal Feed (Pre-Gate vs Post-Gate) -->
+            <div id="retinal-feed-panel" class="glass-panel p-4 flex flex-col gap-4 transition-all duration-300 border-magenta-500/20 shadow-lg shadow-magenta-500/10">
+                <div class="flex justify-between items-center px-1">
+                    <h3 class="text-[10px] font-bold text-magenta-400 uppercase tracking-widest">Thalamic Dual-Retinal Analytics</h3>
+                    <span class="text-[7px] text-gray-600 font-mono">V1_DIAGNOSTICS</span>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <!-- RAW SENSORY FEED -->
+                    <div class="flex flex-col gap-2">
+                        <span class="text-[8px] text-gray-500 uppercase font-bold text-center">Sensory Input (Raw)</span>
+                        <div class="relative group">
+                            <div class="absolute -inset-1 bg-cyan-600 rounded-lg blur opacity-10 group-hover:opacity-20 transition"></div>
+                            <img id="img-raw" class="relative rounded-lg border border-white/5 bg-black w-full aspect-square object-contain pixelated" style="image-rendering: pixelated;">
+                            <div class="absolute top-2 left-2 px-1 py-0.5 bg-cyan-900/80 rounded text-[5px] text-cyan-400 font-bold uppercase">PRE-GATE</div>
+                        </div>
+                    </div>
+                    <!-- GATED SELECTIVE FEED -->
+                    <div class="flex flex-col gap-2">
+                        <span class="text-[8px] text-gray-500 uppercase font-bold text-center">Thalamic Gated Feed</span>
+                        <div class="relative group">
+                            <div class="absolute -inset-1 bg-magenta-600 rounded-lg blur opacity-10 group-hover:opacity-20 transition"></div>
+                            <img id="img-retina" class="relative rounded-lg border border-white/5 bg-black w-full aspect-square object-contain pixelated" style="image-rendering: pixelated;">
+                            <div class="absolute top-2 left-2 px-1 py-0.5 bg-magenta-900/80 rounded text-[5px] text-magenta-400 font-bold uppercase">POST-GATE</div>
+                            <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/60 rounded text-[5px] text-gray-500 font-bold italic">Habituation Active</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -261,7 +318,10 @@
         });
 
         socket.on('ui_update', (data) => {
-            if (!data || !data.activity) return;
+            if (!data) return;
+            // v4.5: Relaxed data guard. We still need to process validation 
+            // even if activity is temporarily sparse.
+            const activity = data.activity || {};
 
             const mode = data.mode || "idle";
             modeEl.innerText = mode.toUpperCase();
@@ -315,31 +375,124 @@
             const brocaInt = data.activity.broca || 0;
             const motorInt = data.activity.cerebellum || 0;
             addLog(`G-Density: ${(globalDensity * 100).toFixed(2)}% | Broca: ${brocaInt.toFixed(4)} | Cere: ${motorInt.toFixed(4)} | Mode: ${data.mode}`);
+
+            // v0.2.8: Update Thalamic Retinal Feed (Dual Feed)
+            if (data.retinal_feed) {
+                document.getElementById('img-retina').src = 'data:image/png;base64,' + data.retinal_feed;
+            }
+            if (data.raw_feed) {
+                document.getElementById('img-raw').src = 'data:image/png;base64,' + data.raw_feed;
+            }
+
+            // v4.4: Update Validation Counters
+            if (data.validation) {
+                document.getElementById('stat-success').innerText = `${data.validation.good} / ${data.validation.total}`;
+                document.getElementById('stat-frustration').innerText = `${data.validation.bad} / ${data.validation.total}`;
+            }
+
+            // v4.5: Update Vocabulary Tab
+            if (data.vocabulary) {
+                updateVocabularyList(data.vocabulary);
+            }
         });
+
+        function switchSidebarTab(tab) {
+            const logsBtn = document.getElementById('tab-btn-logs');
+            const vocabBtn = document.getElementById('tab-btn-vocab');
+            const logsContent = document.getElementById('sidebar-tab-content-logs');
+            const vocabContent = document.getElementById('sidebar-tab-content-vocab');
+
+            if (tab === 'logs') {
+                logsContent.classList.remove('hidden');
+                vocabContent.classList.add('hidden');
+                logsBtn.className = "text-[10px] font-bold text-cyan-400 uppercase tracking-widest border-b-2 border-cyan-400 pb-1";
+                vocabBtn.className = "text-[10px] font-bold text-gray-500 uppercase tracking-widest hover:text-white transition pb-1";
+            } else {
+                logsContent.classList.add('hidden');
+                vocabContent.classList.remove('hidden');
+                logsBtn.className = "text-[10px] font-bold text-gray-500 uppercase tracking-widest hover:text-white transition pb-1";
+                vocabBtn.className = "text-[10px] font-bold text-amber-400 uppercase tracking-widest border-b-2 border-amber-400 pb-1";
+            }
+        }
+
+        function updateVocabularyList(vocab) {
+            const container = document.getElementById('vocab-container');
+            const countEl = document.getElementById('vocab-count');
+            const keys = Object.keys(vocab);
+            
+            if (keys.length === 0) return;
+            countEl.innerText = `${keys.length} WORDS`;
+            
+            // Sort by myelination descending
+            keys.sort((a, b) => vocab[b] - vocab[a]);
+            
+            container.innerHTML = "";
+            keys.forEach(word => {
+                const score = vocab[word];
+                const pct = Math.min(100, (score * 100).toFixed(1));
+                const isMastered = score >= 0.8;
+                
+                const card = document.createElement('div');
+                card.className = `p-2 rounded flex flex-col gap-1 border border-white/5 transition-all duration-500 ${isMastered ? 'bg-amber-400/10 border-amber-400/20' : 'bg-white/5'}`;
+                
+                card.innerHTML = `
+                    <div class="flex justify-between items-center text-[9px] font-bold">
+                        <span class="${isMastered ? 'text-amber-400' : 'text-gray-300'}">${word}</span>
+                        <span class="text-[7px] ${isMastered ? 'text-amber-400' : 'text-gray-500'} tracking-tighter">${isMastered ? '🔒 MASTERED' : '🌱 LEARNING'}</span>
+                    </div>
+                    <div class="h-1 bg-black/40 rounded-full overflow-hidden">
+                        <div class="h-full ${isMastered ? 'bg-amber-400' : 'bg-cyan-500'}" style="width: ${pct}%"></div>
+                    </div>
+                    <span class="text-[6px] text-gray-600 font-mono text-right">MYELINATION: ${pct}%</span>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        const regionColors = {
+            visual: "#ff00ff",
+            temporal: "#00ff00",
+            parietal: "#00eeff",
+            executive: "#ffff00",
+            broca: "#ff6600",
+            hippocampus: "#ffffff",
+            vwfa: "#00ff88",
+            motor_strip: "#ff0088",
+            cerebellum: "#0066ff"
+        };
 
         function updateRegion(name, intensity, permanence, mode) {
             const blob = document.getElementById('blob-' + name);
             const label = document.getElementById('label-' + name);
             if (!blob) return;
 
-            // Intense Scaling logic for Bloom (v3.2: Intensity-mapped Brightness)
-            const opacity = Math.min(1.0, 0.1 + intensity * 6); 
-            const blur = Math.min(60, 10 + intensity * 200);
-            const brightness = 1.0 + (intensity * 8.0); // Boost brightness for excited regions
+            // --- BLOOM CALCULATION (v0.2.8 Dynamic Glow) ---
+            const opacity = Math.min(1.0, 0.05 + intensity * 8); 
+            const blur = Math.min(60, 10 + intensity * 150);
+            const brightness = 1.0 + (intensity * 12.0); 
+            const glowRadius = Math.min(80, intensity * 400);
+            const regionColor = regionColors[name] || "#00eeff";
 
-            blob.style.opacity = intensity > 0.001 ? opacity : 0.05; // Faint ghost pulse for permanency
+            blob.style.opacity = intensity > 0.001 ? opacity : 0.05; 
             
-            // v4.1: Gold Medal 'Aura' for Permanent Synapses
+            // Build the dynamic filter stack
             let filter = `blur(${blur}px) brightness(${brightness})`;
+            
+            // 1. Biological Activity Glow (Bloom)
+            if (intensity > 0.005) {
+                filter += ` drop-shadow(0 0 ${glowRadius}px ${regionColor})`;
+            }
+
+            // 2. Gold Medal 'Aura' for Permanent Synapses
             if (permanence > 0.1) {
                 const goldAura = Math.min(1.0, (permanence - 0.1) * 2);
                 filter += ` drop-shadow(0 0 ${20 * goldAura}px rgba(255, 215, 0, ${0.4 * goldAura}))`;
             }
 
             if (mode === 'inference') {
-                filter += ` saturate(0.5) sepia(0.5) hue-rotate(-10deg)`;
+                filter += ` saturate(0.5) sepia(0.3) hue-rotate(-10deg)`;
             } else if (mode === 'generation') {
-                filter += ` hue-rotate(260deg) saturate(1.5)`;
+                filter += ` hue-rotate(260deg) saturate(1.8)`;
             }
             
             blob.style.filter = filter;
@@ -351,7 +504,7 @@
                 label.classList.add('active');
                 if (mode === 'inference') label.style.color = '#fbbf24';
                 else if (mode === 'generation') label.style.color = '#e879f9';
-                else if (permanence > 0.2) label.style.color = '#ffd700'; // Gold color for Mature regions
+                else if (permanence > 0.2) label.style.color = '#ffd700'; 
                 else label.style.color = '';
             } else {
                 label.classList.remove('active');

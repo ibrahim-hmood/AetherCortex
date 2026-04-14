@@ -21,9 +21,9 @@ def main():
     TIME_STEPS = 30
 
     print("--- Biological Prompt Generation Boot Sequence ---")
-    loader = MultimediaLoader(visual_target_size=(64, 64))
-    tokenizer = SensoryTokenizer(visual_dim=12288, auditory_dim=256)
-    decoder = MotorDecoder(visual_decode_shape=(64, 64, 3))
+    loader = MultimediaLoader(visual_target_size=(128, 128))
+    tokenizer = SensoryTokenizer(visual_dim=49152, auditory_dim=300)
+    decoder = MotorDecoder(visual_decode_shape=(128, 128, 3))
     
     print("> Waking up Brain Connectome (Loading HD topology)...")
     brain = BrainConnectome.load_model("biological_model")
@@ -42,8 +42,8 @@ def main():
     # BIOMIMETIC READING: The prompt enters through the Visual channel as letter-shapes
     visual_text_spikes = tokenizer.thalamic_routing("text", prompt, time_steps=TIME_STEPS)
     
-    blind_visual = tf.zeros((1, TIME_STEPS, 12288), dtype=tf.float32)
-    blind_audio = tf.zeros((1, TIME_STEPS, 256), dtype=tf.float32)
+    blind_visual = tf.zeros((1, TIME_STEPS, 49152), dtype=tf.float32)
+    blind_audio = tf.zeros((1, TIME_STEPS, 300), dtype=tf.float32)
 
     if not args.biogen:
         # ORIGINAL INFERENCE
@@ -68,7 +68,8 @@ def main():
             # --- STREAM TO DASHBOARD (One update per millisecond) ---
             step_context = f"Reading: {prompt} [{t+1}/{TIME_STEPS}ms]"
             p_map = brain.get_permanence_map()
-            streamer.stream_state(activity_map, permanence_map=p_map, context_text=step_context, mode="inference")
+            retinal_view = brain.get_retinal_view()
+            streamer.stream_state(activity_map, permanence_map=p_map, context_text=step_context, mode="inference", retinal_proto=retinal_view)
             
             # Cognitive Pacing: Ensures the ripple is visible on the web dashboard
             time.sleep(0.01)
@@ -168,9 +169,9 @@ def main():
         LONG_STEPS = 300
         # Only read for the first 30 frames
         prompt_segment = tokenizer.thalamic_routing("text", prompt, time_steps=30)
-        silence_segment = tf.zeros((1, LONG_STEPS - 30, 12288), dtype=tf.float32)
+        silence_segment = tf.zeros((1, LONG_STEPS - 30, 49152), dtype=tf.float32)
         long_visual = tf.concat([prompt_segment, silence_segment], axis=1)
-        long_audio = tf.zeros((1, LONG_STEPS, 256), dtype=tf.float32)
+        long_audio = tf.zeros((1, LONG_STEPS, 300), dtype=tf.float32)
         
         all_vis = []
         for t in range(LONG_STEPS):
@@ -196,21 +197,22 @@ def main():
 
     elif mode == "4":
         print("\n> Initiating Active Inference Canvas (Saccadic Drawing)...")
-        canvas = np.zeros((128, 128, 3), dtype=np.uint8)
+        # v4.5: Expanded Canvas to allow 128x128 eye to 'roam' across larger paper
+        canvas = np.zeros((256, 256, 3), dtype=np.uint8)
         current_fovea_x = 0.0 # -1.0 to 1.0 offsets
         current_fovea_y = 0.0
         
         cycles = 15
         for i in range(cycles):
             # Calculate pixel offsets from foveal coordinates (-1.0 to 1.0 range)
-            # Center (0,0) -> Offsets (32, 32) for a 64x64 patch on a 128x128 canvas
-            x_off = int(np.clip(32 + current_fovea_x * 32, 0, 64))
-            y_off = int(np.clip(32 + current_fovea_y * 32, 0, 64))
+            # Center (0,0) -> Offsets (64, 64) for a 128x128 patch on a 256x256 canvas
+            x_off = int(np.clip(64 + current_fovea_x * 64, 0, 128))
+            y_off = int(np.clip(64 + current_fovea_y * 64, 0, 128))
             
             print(f"> Saccade Cycle {i+1}/{cycles} | Fovea: ({current_fovea_x:.2f}, {current_fovea_y:.2f}) -> Offset: ({x_off}, {y_off})")
             
-            # Extract the current foveal patch from the physical canvas
-            patch = canvas[y_off:y_off+64, x_off:x_off+64]
+            # Extract the current foveal patch (HD 128x128)
+            patch = canvas[y_off:y_off+128, x_off:x_off+128]
             vis_tensor = tf.convert_to_tensor(patch, dtype=tf.float32)
             
             # Combine the physical eye view (patch) with the abstract reading (prompt)
@@ -223,6 +225,10 @@ def main():
             
             all_broca = []
             all_vis = []
+            
+            # v4.5: Neural Refresh - clear out 'sticky' electrical patterns before every saccade
+            brain.reset_state()
+            
             for sub_t in range(TIME_STEPS):
                 # Process each saccade-millisecond individually
                 vis_step = vis_input[:, sub_t:sub_t+1, :]
@@ -243,15 +249,21 @@ def main():
             img_arr = decoder.decode_to_image(visual_out, filepath="temp.png")
             
             if cv2 is not None:
-                # Organically blend the visual motor thought onto the actual physical canvas
-                canvas[y_off:y_off+64, x_off:x_off+64] = cv2.addWeighted(canvas[y_off:y_off+64, x_off:x_off+64], 0.3, img_arr, 0.7, 0)
+                # v4.5: Synchronized HD blending (128x128)
+                canvas[y_off:y_off+128, x_off:x_off+128] = cv2.addWeighted(canvas[y_off:y_off+128, x_off:x_off+128], 0.3, img_arr, 0.7, 0)
             
-            # Motor cortex drives purely abstract coordinate translation
-            # Using the Broca's density and variance to simulate motor jitter
-            motor_x = tf.reduce_mean(brocas_out) * 5.0 - 2.5
-            motor_y = tf.math.reduce_std(brocas_out) * 5.0 - 2.5
-            current_fovea_x = float(motor_x)
-            current_fovea_y = float(motor_y)
+            # v4.5: KINETIC MOTOR DYNAMICS
+            # Instead of absolute position, motor spikes now provide directional MOMENTUM (Relative movement)
+            # Scaling reduced (10.0 -> 0.5) because movement is now cumulative over 15 cycles.
+            motor_jitter_x = (tf.reduce_mean(brocas_out) * 1.5 - 0.75) 
+            motor_jitter_y = (tf.math.reduce_std(brocas_out) * 1.5 - 0.75)
+            
+            current_fovea_x += float(motor_jitter_x)
+            current_fovea_y += float(motor_jitter_y)
+            
+            # Boundary Hardening: Prevent the eye from drifting off the paper (-1.0 to 1.0 logic range)
+            current_fovea_x = np.clip(current_fovea_x, -1.0, 1.0)
+            current_fovea_y = np.clip(current_fovea_y, -1.0, 1.0)
             
         if cv2 is not None:
             cv2.imwrite("saccadic_drawing.png", cv2.cvtColor(canvas, cv2.COLOR_RGB2BGR))

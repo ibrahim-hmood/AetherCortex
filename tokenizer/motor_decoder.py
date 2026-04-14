@@ -11,7 +11,7 @@ class MotorDecoder:
     Inverse Tokenizer representing the Motor Strips and musculature.
     Translates Brain Spike trains back into Images, Video, Audio, and Text.
     """
-    def __init__(self, visual_decode_shape=(64, 64, 3)):
+    def __init__(self, visual_decode_shape=(128, 128, 3)):
         self.visual_decode_shape = visual_decode_shape
         self.flat_visual_dim = visual_decode_shape[0] * visual_decode_shape[1] * visual_decode_shape[2]
 
